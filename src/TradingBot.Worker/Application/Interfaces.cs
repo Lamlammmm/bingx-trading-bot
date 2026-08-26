@@ -33,5 +33,5 @@ public interface IRiskManager
 public interface IOpenAiAnalyzer
 {
     bool Enabled { get; }
-    Task<AiDecision?> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken);
+    Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken);
 }

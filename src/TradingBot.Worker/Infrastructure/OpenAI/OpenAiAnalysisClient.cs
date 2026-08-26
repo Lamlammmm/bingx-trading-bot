@@ -16,13 +16,12 @@ public sealed class OpenAiAnalysisClient(HttpClient httpClient, IOptions<OpenAIO
 
     public bool Enabled => _options.Enabled;
 
-    public async Task<AiDecision?> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken)
+    public async Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken)
     {
-        if (!Enabled) return null;
+        if (!Enabled) return new AiAnalysisResult(null, "disabled");
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
         {
-            logger.LogError("OpenAI analysis is enabled but OPENAI_API_KEY is not configured");
-            return null;
+            return new AiAnalysisResult(null, "missing_api_key");
         }
 
         var requestBody = new
@@ -100,44 +99,51 @@ public sealed class OpenAiAnalysisClient(HttpClient httpClient, IOptions<OpenAIO
             }
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
-        request.Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-        using var response = await httpClient.SendAsync(request, cancellationToken);
-        if (!response.IsSuccessStatusCode)
-        {
-            logger.LogError("OpenAI analysis request failed with HTTP {StatusCode}", (int)response.StatusCode);
-            return null;
-        }
-
-        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-        var decisionJson = ExtractOutputText(responseBody);
-        if (decisionJson is null)
-        {
-            logger.LogError("OpenAI response did not contain structured output text");
-            return null;
-        }
-
         try
         {
+            using var request = new HttpRequestMessage(HttpMethod.Post, "responses");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _options.ApiKey);
+            request.Content = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+            using var response = await httpClient.SendAsync(request, cancellationToken);
+            var requestId = response.Headers.TryGetValues("x-request-id", out var requestIds)
+                ? requestIds.FirstOrDefault()
+                : null;
+            if (!response.IsSuccessStatusCode)
+            {
+                var statusCode = (int)response.StatusCode;
+                return new AiAnalysisResult(null, $"http_{statusCode}", statusCode, requestId);
+            }
+
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            var decisionJson = ExtractOutputText(responseBody);
+            if (decisionJson is null)
+                return new AiAnalysisResult(null, "missing_structured_output", RequestId: requestId);
+
             var decision = JsonSerializer.Deserialize<AiDecision>(decisionJson, new JsonSerializerOptions
             {
                 PropertyNameCaseInsensitive = true
             });
             if (!IsValid(decision))
-            {
-                logger.LogWarning("OpenAI returned an invalid trading decision");
-                return null;
-            }
+                return new AiAnalysisResult(null, "invalid_decision", RequestId: requestId);
 
-            logger.LogInformation("OpenAI decision {Action} with confidence {Confidence} for {Symbol}",
+            logger.LogDebug("OpenAI response parsed: action={Action}, confidence={Confidence}, symbol={Symbol}",
                 decision!.Action, decision.Confidence, context.Symbol);
-            return decision;
+            return new AiAnalysisResult(decision, RequestId: requestId);
         }
         catch (JsonException exception)
         {
-            logger.LogError(exception, "Could not parse OpenAI structured trading decision");
-            return null;
+            logger.LogDebug(exception, "OpenAI response JSON could not be parsed");
+            return new AiAnalysisResult(null, "invalid_response_json");
+        }
+        catch (HttpRequestException exception)
+        {
+            logger.LogDebug(exception, "OpenAI request failed");
+            return new AiAnalysisResult(null, "request_failed");
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug(exception, "OpenAI request timed out");
+            return new AiAnalysisResult(null, "timeout");
         }
     }
 
@@ -180,9 +186,10 @@ public sealed class OpenAiAnalysisClient(HttpClient httpClient, IOptions<OpenAIO
     {
         if (decision is null || decision.Confidence < 0m || decision.Confidence > 1m) return false;
         if (decision.Action is not ("long" or "short" or "no_trade")) return false;
+        if (string.IsNullOrWhiteSpace(decision.Reason) || decision.Reason.Length > 2_000 ||
+            string.IsNullOrWhiteSpace(decision.Invalidation) || decision.Invalidation.Length > 2_000) return false;
         if (decision.Action == "no_trade") return true;
         return decision.Confidence >= _options.MinimumConfidence && decision.EntryPrice > 0m &&
-            decision.StopLoss > 0m && decision.TakeProfit > 0m &&
-            decision.Reason.Length <= 2_000 && decision.Invalidation.Length <= 2_000;
+            decision.StopLoss > 0m && decision.TakeProfit > 0m;
     }
 }

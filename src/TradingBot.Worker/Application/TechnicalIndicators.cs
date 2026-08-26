@@ -36,4 +36,28 @@ public static class TechnicalIndicators
         }
         return trueRanges.Average();
     }
+
+    public static decimal Rsi(IReadOnlyList<Candle> candles, int period)
+    {
+        if (candles.Count < period + 1) return 50m;
+        decimal gainSum = 0m, lossSum = 0m;
+        for (var index = candles.Count - period; index < candles.Count; index++)
+        {
+            var change = candles[index].Close - candles[index - 1].Close;
+            if (change >= 0) gainSum += change;
+            else lossSum -= change;
+        }
+        if (lossSum == 0m) return 100m;
+        var averageGain = gainSum / period;
+        var averageLoss = lossSum / period;
+        if (averageLoss == 0m) return 100m;
+        var relativeStrength = averageGain / averageLoss;
+        return 100m - (100m / (1m + relativeStrength));
+    }
+
+    public static decimal BodyRatio(Candle candle)
+    {
+        var range = candle.High - candle.Low;
+        return range <= 0m ? 0m : Math.Abs(candle.Close - candle.Open) / range;
+    }
 }

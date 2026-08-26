@@ -1,4 +1,5 @@
 using System.Threading.Channels;
+using Microsoft.Extensions.Logging.Console;
 using TradingBot.Worker.Application;
 using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
@@ -7,7 +8,20 @@ using TradingBot.Worker.Infrastructure.OpenAI;
 using TradingBot.Worker.Infrastructure.PaperTrading;
 
 var builder = Host.CreateApplicationBuilder(args);
-builder.Logging.AddJsonConsole(options => options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffzzz");
+builder.Logging.ClearProviders();
+if (builder.Environment.IsDevelopment())
+{
+    builder.Logging.AddSimpleConsole(options =>
+    {
+        options.ColorBehavior = LoggerColorBehavior.Enabled;
+        options.SingleLine = true;
+        options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff zzz ";
+    });
+}
+else
+{
+    builder.Logging.AddJsonConsole(options => options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffzzz");
+}
 builder.Services.Configure<BingXOptions>(builder.Configuration.GetSection(BingXOptions.SectionName));
 builder.Services.Configure<StrategyOptions>(builder.Configuration.GetSection(StrategyOptions.SectionName));
 builder.Services.Configure<RiskOptions>(builder.Configuration.GetSection(RiskOptions.SectionName));

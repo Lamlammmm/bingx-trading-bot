@@ -25,6 +25,7 @@ Các endpoint được kiểm tra thực tế ngày 2026-08-26:
 | WebSocket | `wss://open-api-swap.bingx.com/swap-market` |
 
 WebSocket subscribe theo dạng `{symbol}@kline_{interval}`, ví dụ `BTC-USDT@kline_15m`. Client xử lý cả payload GZIP và heartbeat `Ping`/`Pong`, đồng thời nhận được cả dạng `data` object và array đang xuất hiện trong runtime BingX.
+Payload array hiện tại dùng `T` làm thời gian mở nến và không có cờ đóng. Bot giữ snapshot mới nhất theo từng timeframe, rồi chỉ phát nến đã đóng một lần khi nhận timestamp của nến kế tiếp. Khi reconnect, REST đối chiếu nến đóng mới nhất để bù sự kiện gần nhất và không xử lý trùng snapshot WebSocket cũ. Nếu mất kết nối qua nhiều kỳ, bot cảnh báo và chỉ xử lý nến mới nhất thay vì replay nến cũ với context tương lai.
 
 Nguồn tham khảo chính thức: [BingX API Docs](https://bingx-api.github.io/docs-v3/), [BingX Swap Market API Reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-market/api-reference.md), [BingX Swap WebSocket Market Reference](https://github.com/BingX-API/api-ai-skills/blob/main/skills/swap-ws-market/api-reference.md).
 
@@ -91,7 +92,14 @@ Log cần quan sát:
 
 - `Loaded ... closed candles` - REST backfill thành công.
 - `Connected to BingX perpetual market WebSocket` - stream thành công.
+- `Received closed 15m candle` - WebSocket đã chuyển sang kỳ mới và bot đã chốt nến 15m trước đó.
+- `Evaluated closed 15m candle` - paper engine đã đánh giá nến 15m (khi không có vị thế đang mở).
+- `AI RESULT: TRADE LONG/SHORT` - OpenAI đề xuất giao dịch; log Warning màu vàng ở console Development.
+- `AI RESULT: NO_TRADE` - OpenAI chủ động quyết định không giao dịch, kèm confidence và lý do.
+- `AI RESULT: ERROR` - request hoặc response OpenAI bị lỗi; log gồm mã lỗi, HTTP status và request ID, không bị hiểu nhầm là quyết định `no_trade`.
 - `PAPER OPEN` / `PAPER CLOSE` - paper engine đã mô phỏng một giao dịch.
+
+Khi chạy local với `DOTNET_ENVIRONMENT=Development`, console dùng định dạng một dòng có màu để dễ tập trung vào các banner `AI ...`. Các môi trường khác vẫn giữ log JSON để máy thu thập log xử lý ổn định.
 
 ## Cấu trúc module
 

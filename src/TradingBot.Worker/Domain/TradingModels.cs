@@ -44,6 +44,12 @@ public sealed record AiDecision(
     string Reason,
     string Invalidation);
 
+public sealed record AiAnalysisResult(
+    AiDecision? Decision,
+    string? ErrorCode = null,
+    int? HttpStatusCode = null,
+    string? RequestId = null);
+
 public sealed record TradePlan(
     string Symbol,
     TradeDirection Direction,

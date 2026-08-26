@@ -22,6 +22,11 @@ public sealed class StrategyOptions
     public int VolumeLookback { get; set; } = 20;
     public decimal VolumeMultiplier { get; set; } = 1.2m;
     public int AtrPeriod { get; set; } = 14;
+    public int RsiPeriod { get; set; } = 14;
+    public decimal RsiOverbought { get; set; } = 75m;
+    public decimal RsiOversold { get; set; } = 25m;
+    public decimal MinimumBodyRatio { get; set; } = 0.5m;
+    public int SignalCooldownBars { get; set; } = 4;
 }
 
 public sealed class RiskOptions

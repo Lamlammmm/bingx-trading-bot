@@ -19,7 +19,7 @@ public sealed class TradingLogicTests
             VolumeMultiplier = 1.2m,
             AtrPeriod = 14
         }));
-        var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 0.2m, 100m, 130m, 200m);
+        var fifteenMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(15), 100m, 100m, 130m, 200m);
         var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 1m, 100m, 179m, 100m);
         var fourHour = BuildCandles(80, TimeSpan.FromHours(4), 100m, 2m, 100m, 258m, 100m);
 
@@ -64,6 +64,28 @@ public sealed class TradingLogicTests
             var close = start + (step * index);
             candles.Add(new Candle(openTime, openTime.Add(interval), close - step, close + 0.5m, close - 0.5m,
                 close, previousVolume, true));
+            openTime = openTime.Add(interval);
+        }
+
+        candles.Add(new Candle(openTime, openTime.Add(interval), finalClose - 1m, finalClose + 1m, finalClose - 1m,
+            finalClose, finalVolume, true));
+        return candles;
+    }
+
+    private static IReadOnlyList<Candle> BuildOscillatingCandles(int count, TimeSpan interval, decimal start,
+        decimal previousVolume, decimal finalClose, decimal finalVolume)
+    {
+        var candles = new List<Candle>(count);
+        var openTime = DateTimeOffset.UtcNow.Add(-interval * count);
+        var close = start;
+        for (var index = 0; index < count - 1; index++)
+        {
+            var step = index % 3 == 2 ? -0.6m : 0.5m;
+            var open = close;
+            close += step;
+            var high = Math.Max(open, close) + 0.5m;
+            var low = Math.Min(open, close) - 0.5m;
+            candles.Add(new Candle(openTime, openTime.Add(interval), open, high, low, close, previousVolume, true));
             openTime = openTime.Add(interval);
         }
 
