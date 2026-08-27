@@ -15,17 +15,20 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
     private readonly BingXOptions _options = options.Value;
     private DateTimeOffset _nextParseWarningAt;
 
-    public async Task StreamAsync(Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken)
+    public async Task StreamAsync(IReadOnlyList<string> symbols, Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken)
     {
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(_options.WebSocketUrl), cancellationToken);
-        foreach (var interval in new[] { "15m", "1h", "4h" })
+        foreach (var symbol in symbols)
         {
-            var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{_options.Symbol}@kline_{interval}" });
-            await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
+            foreach (var interval in new[] { "15m", "1h", "4h" })
+            {
+                var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{symbol}@kline_{interval}" });
+                await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
+            }
         }
 
-        logger.LogInformation("Connected to BingX perpetual market WebSocket for {Symbol}", _options.Symbol);
+        logger.LogInformation("Connected to BingX perpetual market WebSocket for {Symbols}", string.Join(", ", symbols));
         while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
         {
             var message = await ReceiveMessageAsync(socket, cancellationToken);
@@ -48,7 +51,15 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
             }
 
             foreach (var update in parsedUpdates)
+            {
+                if (update.TimeFrame == TimeFrame.FifteenMinutes && logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
+                        update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,
+                        update.Candle.Close, update.Candle.Volume, update.Candle.OpenTime, update.Candle.IsClosed);
+                }
                 await onUpdate(update);
+            }
         }
     }
 
@@ -85,7 +96,9 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
             if (!root.TryGetProperty("dataType", out var dataTypeProperty)) return Array.Empty<MarketUpdate>();
             var dataType = dataTypeProperty.GetString() ?? string.Empty;
             if (!dataType.Contains("@kline_", StringComparison.Ordinal)) return Array.Empty<MarketUpdate>();
-            var interval = dataType[(dataType.IndexOf("@kline_", StringComparison.Ordinal) + 7)..];
+            var separatorIndex = dataType.IndexOf("@kline_", StringComparison.Ordinal);
+            var symbol = dataType[..separatorIndex];
+            var interval = dataType[(separatorIndex + 7)..];
             var timeFrame = interval switch
             {
                 "15m" => TimeFrame.FifteenMinutes,
@@ -100,13 +113,13 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
             {
                 foreach (var item in data.EnumerateArray())
                 {
-                    var update = ParseKline(timeFrame.Value, item);
+                    var update = ParseKline(symbol, timeFrame.Value, item);
                     if (update is not null) updates.Add(update);
                 }
             }
             else
             {
-                var update = ParseKline(timeFrame.Value, data);
+                var update = ParseKline(symbol, timeFrame.Value, data);
                 if (update is not null) updates.Add(update);
             }
 
@@ -118,7 +131,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
         }
     }
 
-    private static MarketUpdate? ParseKline(TimeFrame timeFrame, JsonElement data)
+    private static MarketUpdate? ParseKline(string symbol, TimeFrame timeFrame, JsonElement data)
     {
         if (data.ValueKind != JsonValueKind.Object) return null;
 
@@ -137,7 +150,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
             : openTime.Add(GetDuration(timeFrame));
         var candle = new Candle(openTime, closeTime, GetDecimal(kline, "o"), GetDecimal(kline, "h"),
             GetDecimal(kline, "l"), GetDecimal(kline, "c"), GetDecimal(kline, "v"), false);
-        return new MarketUpdate(timeFrame, candle);
+        return new MarketUpdate(symbol, timeFrame, candle);
     }
 
     private static TimeSpan GetDuration(TimeFrame timeFrame) => timeFrame switch

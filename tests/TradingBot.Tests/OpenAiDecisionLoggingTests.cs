@@ -17,7 +17,7 @@ public sealed class OpenAiDecisionLoggingTests
             "No confirmed breakout", "Wait for a closed candle above resistance");
         var engine = CreateEngine(decision, null, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiNoTrade"));
         Assert.Contains("AI RESULT: NO_TRADE", resultLog.Message, StringComparison.Ordinal);
@@ -34,7 +34,7 @@ public sealed class OpenAiDecisionLoggingTests
             100m, 2m, "technical confirmation");
         var engine = CreateEngine(decision, technicalSignal, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiTrade"));
         Assert.Equal(LogLevel.Warning, resultLog.Level);
@@ -47,7 +47,7 @@ public sealed class OpenAiDecisionLoggingTests
         var logger = new ListLogger<PaperTradingEngine>();
         var engine = CreateEngine(null, null, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiError"));
         Assert.Equal(LogLevel.Error, resultLog.Level);
@@ -71,7 +71,7 @@ public sealed class OpenAiDecisionLoggingTests
     private static MarketUpdate CreateClosedUpdate()
     {
         var openTime = DateTimeOffset.UtcNow.AddMinutes(-15);
-        return new MarketUpdate(TimeFrame.FifteenMinutes,
+        return new MarketUpdate("BTC-USDT", TimeFrame.FifteenMinutes,
             new Candle(openTime, openTime.AddMinutes(15), 99m, 101m, 98m, 100m, 10m, true));
     }
 

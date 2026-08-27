@@ -14,8 +14,8 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 {
     private readonly BingXOptions _options = options.Value;
     private readonly ClosedCandleTracker _closedCandleTracker = new();
-    private readonly Dictionary<TimeFrame, DateTimeOffset> _lastPublishedOpenTimes = new();
-    private bool _historyInitialized;
+    private readonly Dictionary<(string Symbol, TimeFrame TimeFrame), DateTimeOffset> _lastPublishedOpenTimes = new();
+    private readonly HashSet<string> _historyInitializedSymbols = new();
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -24,7 +24,7 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
         {
             try
             {
-                await marketStream.StreamAsync(async update =>
+                await marketStream.StreamAsync(_options.Symbols, async update =>
                 {
                     var closedUpdate = _closedCandleTracker.Observe(update);
                     if (closedUpdate is not null)
@@ -61,32 +61,40 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 
     private async Task LoadHistoryAsync(CancellationToken cancellationToken)
     {
-        var contract = await marketClient.GetContractAsync(cancellationToken);
+        foreach (var symbol in _options.Symbols)
+        {
+            await LoadHistoryForSymbolAsync(symbol, cancellationToken);
+        }
+    }
+
+    private async Task LoadHistoryForSymbolAsync(string symbol, CancellationToken cancellationToken)
+    {
+        var contract = await marketClient.GetContractAsync(symbol, cancellationToken);
         if (contract is null || !contract.IsActive)
-            throw new InvalidOperationException($"BingX contract {_options.Symbol} is missing or inactive.");
+            throw new InvalidOperationException($"BingX contract {symbol} is missing or inactive.");
         logger.LogInformation("BingX contract {Symbol}: minQty={MinimumQuantity}, minValue={MinimumOrderValue} USDT, pricePrecision={PricePrecision}",
             contract.Symbol, contract.MinimumQuantity, contract.MinimumOrderValue, contract.PricePrecision);
 
         var loadedHistory = new Dictionary<TimeFrame, IReadOnlyList<Candle>>();
         foreach (var timeFrame in new[] { TimeFrame.FifteenMinutes, TimeFrame.OneHour, TimeFrame.FourHours })
         {
-            var candles = await marketClient.GetCandlesAsync(timeFrame, _options.HistoryLimit, cancellationToken);
-            foreach (var candle in candles) candleStore.Upsert(timeFrame, candle);
+            var candles = await marketClient.GetCandlesAsync(symbol, timeFrame, _options.HistoryLimit, cancellationToken);
+            foreach (var candle in candles) candleStore.Upsert(symbol, timeFrame, candle);
             loadedHistory[timeFrame] = candles;
-            logger.LogInformation("Loaded {Count} closed candles for {TimeFrame}", candles.Count, timeFrame);
+            logger.LogInformation("Loaded {Count} closed candles for {Symbol} {TimeFrame}", candles.Count, symbol, timeFrame);
         }
 
-        var isInitialLoad = !_historyInitialized;
-        _historyInitialized = true;
+        var isInitialLoad = !_historyInitializedSymbols.Contains(symbol);
+        _historyInitializedSymbols.Add(symbol);
         foreach (var (timeFrame, candles) in loadedHistory)
         {
             if (candles.Count == 0) continue;
             var latest = candles[^1];
-            _closedCandleTracker.DiscardThrough(timeFrame, latest.OpenTime);
+            _closedCandleTracker.DiscardThrough(symbol, timeFrame, latest.OpenTime);
 
             if (isInitialLoad)
             {
-                _lastPublishedOpenTimes[timeFrame] = latest.OpenTime;
+                _lastPublishedOpenTimes[(symbol, timeFrame)] = latest.OpenTime;
                 continue;
             }
 
@@ -94,20 +102,20 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
             {
                 // Reconcile only the newest missed 15m candle. Replaying multiple candles through a
                 // shared store would evaluate old updates against future 1h/4h context.
-                if (_lastPublishedOpenTimes.TryGetValue(timeFrame, out var lastPublished))
+                if (_lastPublishedOpenTimes.TryGetValue((symbol, timeFrame), out var lastPublished))
                 {
                     var missedCount = candles.Count(candle => candle.OpenTime > lastPublished);
                     if (missedCount > 1)
                     {
-                        logger.LogWarning("BingX reconnect missed {MissedCount} closed 15m candles; reconciling only the latest and skipping {SkippedCount} intermediate candles",
-                            missedCount, missedCount - 1);
+                        logger.LogWarning("BingX reconnect missed {MissedCount} closed 15m candles for {Symbol}; reconciling only the latest and skipping {SkippedCount} intermediate candles",
+                            missedCount, symbol, missedCount - 1);
                     }
                 }
-                await PublishClosedCandleAsync(new MarketUpdate(timeFrame, latest with { IsClosed = true }), cancellationToken);
+                await PublishClosedCandleAsync(new MarketUpdate(symbol, timeFrame, latest with { IsClosed = true }), cancellationToken);
             }
-            else if (!_lastPublishedOpenTimes.TryGetValue(timeFrame, out var lastPublished) || latest.OpenTime > lastPublished)
+            else if (!_lastPublishedOpenTimes.TryGetValue((symbol, timeFrame), out var lastPublished) || latest.OpenTime > lastPublished)
             {
-                _lastPublishedOpenTimes[timeFrame] = latest.OpenTime;
+                _lastPublishedOpenTimes[(symbol, timeFrame)] = latest.OpenTime;
             }
         }
     }
@@ -115,17 +123,18 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
     private async Task PublishClosedCandleAsync(MarketUpdate update, CancellationToken cancellationToken)
     {
         if (!update.Candle.IsClosed) return;
-        if (_lastPublishedOpenTimes.TryGetValue(update.TimeFrame, out var lastPublished) &&
+        var key = (update.Symbol, update.TimeFrame);
+        if (_lastPublishedOpenTimes.TryGetValue(key, out var lastPublished) &&
             update.Candle.OpenTime <= lastPublished) return;
 
-        candleStore.Upsert(update.TimeFrame, update.Candle);
+        candleStore.Upsert(update.Symbol, update.TimeFrame, update.Candle);
         await updates.Writer.WriteAsync(update, cancellationToken);
-        _lastPublishedOpenTimes[update.TimeFrame] = update.Candle.OpenTime;
+        _lastPublishedOpenTimes[key] = update.Candle.OpenTime;
 
         if (update.TimeFrame == TimeFrame.FifteenMinutes)
         {
             logger.LogInformation("Received closed 15m candle for {Symbol}: openTime={OpenTime}, closeTime={CloseTime}, close={Close}, volume={Volume}",
-                _options.Symbol, update.Candle.OpenTime, update.Candle.CloseTime, update.Candle.Close, update.Candle.Volume);
+                update.Symbol, update.Candle.OpenTime, update.Candle.CloseTime, update.Candle.Close, update.Candle.Volume);
         }
     }
 }

@@ -5,7 +5,7 @@ public sealed class BingXOptions
     public const string SectionName = "BingX";
     public string RestBaseUrl { get; set; } = "https://open-api.bingx.com";
     public string WebSocketUrl { get; set; } = "wss://open-api-swap.bingx.com/swap-market";
-    public string Symbol { get; set; } = "BTC-USDT";
+    public List<string> Symbols { get; set; } = new() { "BTC-USDT" };
     public string? ApiKey { get; set; }
     public string? ApiSecret { get; set; }
     public int HistoryLimit { get; set; } = 250;

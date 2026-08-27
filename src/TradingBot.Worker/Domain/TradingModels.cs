@@ -13,7 +13,7 @@ public sealed record Candle(
     decimal Volume,
     bool IsClosed);
 
-public sealed record MarketUpdate(TimeFrame TimeFrame, Candle Candle);
+public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle);
 
 public sealed record StrategySignal(
     string Symbol,

@@ -64,19 +64,22 @@ Tạo API key của chính bạn trong OpenAI Platform, sau đó truyền qua en
 
 ```powershell
 $env:OPENAI_API_KEY = "your-key-from-openai-platform"
-$env:TRADINGBOT__OPENAI__ENABLED = "true"
-$env:TRADINGBOT__OPENAI__MODEL = "gpt-5.2"
+$env:OPENAI__ENABLED = "true"
+$env:OPENAI__MODEL = "gpt-5.2"
 dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 ```
 
 Mỗi nến 15m đã đóng, bot gửi dữ liệu nến gần nhất của 15m/1h/4h cùng technical context lên OpenAI Responses API với `store=false`. AI chỉ trả về quyết định có schema cố định. Paper engine dùng giá thị trường hiện tại, còn SL/TP của AI phải vượt qua Risk Gate trước khi mô phỏng lệnh.
 
-Có thể cấu hình bằng biến môi trường với prefix `TRADINGBOT__`, ví dụ:
+**Khuyến nghị: giữ `OPENAI__ENABLED=false` (mặc định).** Dùng LLM để ra quyết định vào lệnh theo thời gian thực chưa được kiểm chứng có edge thống kê thật sự, kết quả không nhất quán giữa các lần gọi nên khó backtest, và tốn chi phí/độ trễ mỗi 15 phút. Rule-engine (`BreakoutStrategy` + `RiskManager`) là nguồn quyết định chính; code AI vẫn giữ lại để thử nghiệm có kiểm soát khi cần.
+
+Biến môi trường phải trùng tên section trong `appsettings.json` (`BingX` / `Strategy` / `Risk` / `OpenAI`) — **không có** tiền tố `TradingBot`. Ví dụ cấu hình nhiều symbol cùng lúc:
 
 ```powershell
-$env:TRADINGBOT__BINGX__SYMBOL = "BTC-USDT"
-$env:TRADINGBOT__RISK__STARTINGBALANCE = "10000"
-$env:TRADINGBOT__RISK__RISKPERTRADEPERCENT = "0.5"
+$env:BINGX__SYMBOLS__0 = "BTC-USDT"
+$env:BINGX__SYMBOLS__1 = "ETH-USDT"
+$env:RISK__STARTINGBALANCE = "10000"
+$env:RISK__RISKPERTRADEPERCENT = "0.5"
 dotnet run --project src/TradingBot.Worker/TradingBot.Worker.csproj
 ```
 

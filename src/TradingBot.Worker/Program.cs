@@ -37,6 +37,16 @@ builder.Services.PostConfigure<BingXOptions>(options =>
     {
         options.ApiSecret = Environment.GetEnvironmentVariable("BINGX_API_SECRET");
     }
+
+    options.Symbols = options.Symbols
+        .Where(symbol => !string.IsNullOrWhiteSpace(symbol))
+        .Select(symbol => symbol.Trim().ToUpperInvariant())
+        .Distinct()
+        .ToList();
+    if (options.Symbols.Count == 0)
+    {
+        options.Symbols.Add("BTC-USDT");
+    }
 });
 builder.Services.PostConfigure<OpenAIOptions>(options =>
 {

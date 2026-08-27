@@ -1,19 +1,14 @@
 using System.Globalization;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
-using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
 
 namespace TradingBot.Worker.Infrastructure.BingX;
 
-public sealed class BingXRestClient(HttpClient httpClient, IOptions<BingXOptions> options,
-    ILogger<BingXRestClient> logger) : IBingXMarketClient
+public sealed class BingXRestClient(HttpClient httpClient, ILogger<BingXRestClient> logger) : IBingXMarketClient
 {
-    private readonly BingXOptions _options = options.Value;
-
-    public async Task<IReadOnlyList<Candle>> GetCandlesAsync(TimeFrame timeFrame, int limit, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<Candle>> GetCandlesAsync(string symbol, TimeFrame timeFrame, int limit, CancellationToken cancellationToken)
     {
         var interval = timeFrame switch
         {
@@ -22,7 +17,7 @@ public sealed class BingXRestClient(HttpClient httpClient, IOptions<BingXOptions
             TimeFrame.FourHours => "4h",
             _ => throw new ArgumentOutOfRangeException(nameof(timeFrame))
         };
-        var url = $"openApi/swap/v3/quote/klines?symbol={Uri.EscapeDataString(_options.Symbol)}&interval={interval}&limit={Math.Clamp(limit, 1, 1440)}";
+        var url = $"openApi/swap/v3/quote/klines?symbol={Uri.EscapeDataString(symbol)}&interval={interval}&limit={Math.Clamp(limit, 1, 1440)}";
         using var document = await GetDocumentAsync(url, cancellationToken);
         var candles = new List<Candle>();
         foreach (var item in document.RootElement.GetProperty("data").EnumerateArray())
@@ -31,18 +26,18 @@ public sealed class BingXRestClient(HttpClient httpClient, IOptions<BingXOptions
             if (candle is not null && candle.IsClosed) candles.Add(candle);
         }
         candles.Sort((left, right) => left.OpenTime.CompareTo(right.OpenTime));
-        logger.LogDebug("Loaded {Count} closed {TimeFrame} candles for {Symbol}", candles.Count, timeFrame, _options.Symbol);
+        logger.LogDebug("Loaded {Count} closed {TimeFrame} candles for {Symbol}", candles.Count, timeFrame, symbol);
         return candles;
     }
 
-    public async Task<ContractInfo?> GetContractAsync(CancellationToken cancellationToken)
+    public async Task<ContractInfo?> GetContractAsync(string symbol, CancellationToken cancellationToken)
     {
-        var url = $"openApi/swap/v2/quote/contracts?symbol={Uri.EscapeDataString(_options.Symbol)}";
+        var url = $"openApi/swap/v2/quote/contracts?symbol={Uri.EscapeDataString(symbol)}";
         using var document = await GetDocumentAsync(url, cancellationToken);
         var item = document.RootElement.GetProperty("data");
         if (item.ValueKind == JsonValueKind.Array) item = item.EnumerateArray().FirstOrDefault();
         if (item.ValueKind != JsonValueKind.Object) return null;
-        return new ContractInfo(item.GetProperty("symbol").GetString() ?? _options.Symbol,
+        return new ContractInfo(item.GetProperty("symbol").GetString() ?? symbol,
             GetDecimal(item, "quantityPrecision"), GetDecimal(item, "pricePrecision"),
             GetDecimal(item, "tradeMinQuantity"), GetDecimal(item, "tradeMinUSDT"), GetDecimal(item, "status") == 1m);
     }

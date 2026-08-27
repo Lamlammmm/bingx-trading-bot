@@ -70,7 +70,7 @@ public sealed class BingXWebSocketClientTests
         var firstOpen = DateTimeOffset.FromUnixTimeMilliseconds(1787750100000);
         Assert.Null(tracker.Observe(CreateUpdate(firstOpen, 100m, 10m)));
 
-        tracker.DiscardThrough(TimeFrame.FifteenMinutes, firstOpen.AddMinutes(15));
+        tracker.DiscardThrough("BTC-USDT", TimeFrame.FifteenMinutes, firstOpen.AddMinutes(15));
 
         var current = CreateUpdate(firstOpen.AddMinutes(30), 103m, 2m);
         Assert.Null(tracker.Observe(current));
@@ -80,6 +80,6 @@ public sealed class BingXWebSocketClientTests
     }
 
     private static MarketUpdate CreateUpdate(DateTimeOffset openTime, decimal close, decimal volume) =>
-        new(TimeFrame.FifteenMinutes,
+        new("BTC-USDT", TimeFrame.FifteenMinutes,
             new Candle(openTime, openTime.AddMinutes(15), close - 1m, close + 1m, close - 2m, close, volume, false));
 }

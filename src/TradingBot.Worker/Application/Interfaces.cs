@@ -4,19 +4,19 @@ namespace TradingBot.Worker.Application;
 
 public interface ICandleStore
 {
-    void Upsert(TimeFrame timeFrame, Candle candle);
-    IReadOnlyList<Candle> Get(TimeFrame timeFrame);
+    void Upsert(string symbol, TimeFrame timeFrame, Candle candle);
+    IReadOnlyList<Candle> Get(string symbol, TimeFrame timeFrame);
 }
 
 public interface IBingXMarketClient
 {
-    Task<IReadOnlyList<Candle>> GetCandlesAsync(TimeFrame timeFrame, int limit, CancellationToken cancellationToken);
-    Task<ContractInfo?> GetContractAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<Candle>> GetCandlesAsync(string symbol, TimeFrame timeFrame, int limit, CancellationToken cancellationToken);
+    Task<ContractInfo?> GetContractAsync(string symbol, CancellationToken cancellationToken);
 }
 
 public interface IBingXMarketStream
 {
-    Task StreamAsync(Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken);
+    Task StreamAsync(IReadOnlyList<string> symbols, Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken);
 }
 
 public interface ITradingStrategy
