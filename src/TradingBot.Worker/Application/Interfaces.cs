@@ -27,11 +27,20 @@ public interface ITradingStrategy
 
 public interface IRiskManager
 {
-    TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition, decimal realizedPnlToday);
+    TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition,
+        decimal realizedPnlToday, decimal aggregateOpenRisk);
 }
 
 public interface IOpenAiAnalyzer
 {
     bool Enabled { get; }
     Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken);
+}
+
+public interface ITradeStore
+{
+    Task InitializeAsync(CancellationToken cancellationToken);
+    Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken);
+    Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken);
+    Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken);
 }

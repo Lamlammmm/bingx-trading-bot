@@ -61,6 +61,19 @@ public sealed record TradePlan(
     decimal EntryFee,
     string Reason);
 
+public sealed record TradeFeatures(
+    decimal Rsi15m,
+    decimal Rsi1h,
+    decimal Rsi4h,
+    decimal Atr15m,
+    decimal EmaFast15m,
+    decimal EmaSlow15m,
+    decimal VolumeRatio15m,
+    decimal BodyRatio15m,
+    decimal Confidence,
+    int HourOfDayUtc,
+    int DayOfWeekUtc);
+
 public sealed record PaperPosition(
     string Symbol,
     TradeDirection Direction,
@@ -70,7 +83,8 @@ public sealed record PaperPosition(
     decimal TakeProfit,
     decimal RiskAmount,
     decimal EntryFee,
-    DateTimeOffset OpenedAt);
+    DateTimeOffset OpenedAt,
+    TradeFeatures? EntryFeatures = null);
 
 public sealed record ContractInfo(
     string Symbol,
@@ -79,3 +93,23 @@ public sealed record ContractInfo(
     decimal MinimumQuantity,
     decimal MinimumOrderValue,
     bool IsActive);
+
+public sealed record AccountState(
+    decimal Balance,
+    DateOnly BalanceDate,
+    decimal RealizedPnlToday);
+
+public sealed record ClosedTrade(
+    string Symbol,
+    TradeDirection Direction,
+    decimal Quantity,
+    decimal EntryPrice,
+    decimal ExitPrice,
+    decimal StopLoss,
+    decimal TakeProfit,
+    decimal NetPnl,
+    string ExitReason,
+    string Source,
+    DateTimeOffset OpenedAt,
+    DateTimeOffset ClosedAt,
+    TradeFeatures? EntryFeatures = null);

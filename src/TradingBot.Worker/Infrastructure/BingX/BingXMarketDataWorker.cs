@@ -133,8 +133,9 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 
         if (update.TimeFrame == TimeFrame.FifteenMinutes)
         {
-            logger.LogInformation("Received closed 15m candle for {Symbol}: openTime={OpenTime}, closeTime={CloseTime}, close={Close}, volume={Volume}",
-                update.Symbol, update.Candle.OpenTime, update.Candle.CloseTime, update.Candle.Close, update.Candle.Volume);
+            logger.LogInformation("Received closed 15m candle for {Symbol}: openTime={OpenTime}, closeTime={CloseTime}, open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}",
+                update.Symbol, update.Candle.OpenTime, update.Candle.CloseTime, update.Candle.Open, update.Candle.High,
+                update.Candle.Low, update.Candle.Close, update.Candle.Volume);
         }
     }
 }

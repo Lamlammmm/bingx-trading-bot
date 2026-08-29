@@ -52,9 +52,9 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
 
             foreach (var update in parsedUpdates)
             {
-                if (update.TimeFrame == TimeFrame.FifteenMinutes && logger.IsEnabled(LogLevel.Debug))
+                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FifteenMinutes)
                 {
-                    logger.LogDebug("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
+                    logger.LogInformation("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
                         update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,
                         update.Candle.Close, update.Candle.Volume, update.Candle.OpenTime, update.Candle.IsClosed);
                 }

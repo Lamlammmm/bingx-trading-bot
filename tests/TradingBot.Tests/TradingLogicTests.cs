@@ -41,17 +41,40 @@ public sealed class TradingLogicTests
             StopAtrMultiplier = 1.5m,
             TakeProfitRiskMultiple = 2m,
             FeeRate = 0.0005m,
-            MinimumQuantity = 0.0001m
+            MinimumQuantity = 0.0001m,
+            MaxAggregateOpenRiskPercent = 100m
         }));
         var signal = new StrategySignal("BTC-USDT", TradeDirection.Long, DateTimeOffset.UtcNow, 100m, 2m, "test");
 
-        var plan = riskManager.CreatePlan(signal, 10_000m, null, 0m);
+        var plan = riskManager.CreatePlan(signal, 10_000m, null, 0m, 0m);
 
         Assert.NotNull(plan);
         Assert.Equal(50m, plan.RiskAmount);
         Assert.Equal(97m, plan.StopLoss);
         Assert.Equal(106m, plan.TakeProfit);
         Assert.Equal(50m / 3m, plan.Quantity, 8);
+    }
+
+    [Fact]
+    public void RiskManager_RejectsWhenAggregateOpenRiskExceedsCap()
+    {
+        var riskManager = new RiskManager(Options.Create(new RiskOptions
+        {
+            RiskPerTradePercent = 0.5m,
+            MaxDailyLossPercent = 2m,
+            MaxLeverage = 3m,
+            StopAtrMultiplier = 1.5m,
+            TakeProfitRiskMultiple = 2m,
+            FeeRate = 0.0005m,
+            MinimumQuantity = 0.0001m,
+            MaxAggregateOpenRiskPercent = 1m
+        }));
+        var signal = new StrategySignal("ETH-USDT", TradeDirection.Long, DateTimeOffset.UtcNow, 100m, 2m, "test");
+
+        // 0.5% risk on this trade would push aggregate open risk (0.6%) past the 1% cap.
+        var plan = riskManager.CreatePlan(signal, 10_000m, null, 0m, 60m);
+
+        Assert.Null(plan);
     }
 
     private static IReadOnlyList<Candle> BuildCandles(int count, TimeSpan interval, decimal start, decimal step,

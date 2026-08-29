@@ -60,12 +60,12 @@ public sealed class OpenAiDecisionLoggingTests
     {
         var store = new InMemoryCandleStore();
         return new PaperTradingEngine(store, new StubStrategy(technicalSignal),
-            new RiskManager(Options.Create(new RiskOptions())), new StubAnalyzer(decision),
+            new RiskManager(Options.Create(new RiskOptions())), new StubAnalyzer(decision), new NoOpTradeStore(),
             Options.Create(new RiskOptions()), Options.Create(new OpenAIOptions
             {
                 Enabled = true,
                 MaximumEntryDeviationPercent = 0.25m
-            }), Options.Create(new StrategyOptions()), logger);
+            }), Options.Create(new StrategyOptions()), new ConsoleColorOptions { Enabled = false }, logger);
     }
 
     private static MarketUpdate CreateClosedUpdate()
@@ -89,6 +89,14 @@ public sealed class OpenAiDecisionLoggingTests
     {
         public StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> fifteenMinuteCandles,
             IReadOnlyList<Candle> oneHourCandles, IReadOnlyList<Candle> fourHourCandles) => signal;
+    }
+
+    private sealed class NoOpTradeStore : ITradeStore
+    {
+        public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken) => Task.FromResult<AccountState?>(null);
+        public Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class ListLogger<T> : ILogger<T>

@@ -10,7 +10,7 @@ public sealed class TradingWorker(Channel<MarketUpdate> updates, PaperTradingEng
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        paperTrading.Initialize();
+        await paperTrading.InitializeAsync(stoppingToken);
         await foreach (var update in updates.Reader.ReadAllAsync(stoppingToken))
         {
             try

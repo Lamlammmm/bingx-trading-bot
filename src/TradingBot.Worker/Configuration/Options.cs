@@ -1,5 +1,10 @@
 namespace TradingBot.Worker.Configuration;
 
+public sealed class ConsoleColorOptions
+{
+    public bool Enabled { get; init; }
+}
+
 public sealed class BingXOptions
 {
     public const string SectionName = "BingX";
@@ -11,6 +16,7 @@ public sealed class BingXOptions
     public int HistoryLimit { get; set; } = 250;
     public int RequestTimeoutSeconds { get; set; } = 20;
     public int ReconnectDelaySeconds { get; set; } = 5;
+    public bool LogRawPriceUpdates { get; set; }
 }
 
 public sealed class StrategyOptions
@@ -42,6 +48,15 @@ public sealed class RiskOptions
     public decimal MinimumQuantity { get; set; } = 0.0001m;
     public decimal MaximumStopAtrMultiplier { get; set; } = 3m;
     public decimal MinimumTakeProfitRiskMultiple { get; set; } = 1.5m;
+    public decimal MaxAggregateOpenRiskPercent { get; set; } = 2m;
+}
+
+public sealed class PersistenceOptions
+{
+    public const string SectionName = "Persistence";
+    public string Provider { get; set; } = "Sqlite";
+    public string DatabasePath { get; set; } = "data/tradingbot.db";
+    public string? ConnectionString { get; set; }
 }
 
 public sealed class OpenAIOptions

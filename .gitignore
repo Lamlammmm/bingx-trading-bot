@@ -5,3 +5,5 @@ obj/
 src/TradingBot.Worker/appsettings.Development.json
 outputs/
 work/
+src/TradingBot.Worker/data/
+/data/

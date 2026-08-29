@@ -8,7 +8,8 @@ public sealed class RiskManager(IOptions<RiskOptions> options) : IRiskManager
 {
     private readonly RiskOptions _options = options.Value;
 
-    public TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition, decimal realizedPnlToday)
+    public TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition,
+        decimal realizedPnlToday, decimal aggregateOpenRisk)
     {
         if (openPosition is not null || accountBalance <= 0m) return null;
         var maxDailyLoss = accountBalance * (_options.MaxDailyLossPercent / 100m);
@@ -34,6 +35,9 @@ public sealed class RiskManager(IOptions<RiskOptions> options) : IRiskManager
             return null;
 
         var riskAmount = accountBalance * (_options.RiskPerTradePercent / 100m);
+        var maxAggregateRisk = accountBalance * (_options.MaxAggregateOpenRiskPercent / 100m);
+        if (aggregateOpenRisk + riskAmount > maxAggregateRisk) return null;
+
         var quantity = Math.Min(riskAmount / stopDistance, (accountBalance * _options.MaxLeverage) / signal.EntryPrice);
         if (quantity < _options.MinimumQuantity) return null;
 

@@ -16,3 +16,18 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       BINGX_API_KEY: ${BINGX_API_KEY:-}
       BINGX_API_SECRET: ${BINGX_API_SECRET:-}
+    volumes:
+      - ./data:/app/data
+
+  # Web UI to browse/query the SQLite trade database at http://localhost:8080
+  # (SQLite itself is an embedded file DB, not a server - this is just a viewer).
+  sqlite-web:
+    image: coleifer/sqlite-web
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    volumes:
+      - ./data:/data
+    command: ["sqlite_web", "/data/tradingbot.db", "--host", "0.0.0.0"]
+    depends_on:
+      - trading-bot
