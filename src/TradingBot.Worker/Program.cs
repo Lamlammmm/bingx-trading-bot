@@ -1,5 +1,6 @@
 using System.Threading.Channels;
-using Microsoft.Extensions.Logging.Console;
+using Serilog;
+using Serilog.Sinks.SystemConsole.Themes;
 using TradingBot.Worker.Application;
 using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
@@ -9,24 +10,28 @@ using TradingBot.Worker.Infrastructure.PaperTrading;
 using TradingBot.Worker.Infrastructure.Persistence;
 
 var builder = Host.CreateApplicationBuilder(args);
+var seqUrl = builder.Configuration["Seq:Url"];
 builder.Logging.ClearProviders();
-if (builder.Environment.IsDevelopment())
+var loggerConfiguration = new LoggerConfiguration()
+    .MinimumLevel.Information()
+    .Enrich.FromLogContext();
+if (!string.IsNullOrWhiteSpace(seqUrl))
 {
-    builder.Logging.AddSimpleConsole(options =>
-    {
-        options.ColorBehavior = LoggerColorBehavior.Enabled;
-        options.SingleLine = true;
-        options.TimestampFormat = "yyyy-MM-dd HH:mm:ss.fff zzz ";
-    });
+    // Seq is the primary log sink when configured; console is skipped to avoid duplicate I/O.
+    loggerConfiguration.WriteTo.Seq(seqUrl);
 }
 else
 {
-    builder.Logging.AddJsonConsole(options => options.TimestampFormat = "yyyy-MM-ddTHH:mm:ss.fffzzz");
+    loggerConfiguration.WriteTo.Console(
+        outputTemplate: "{Timestamp:yyyy-MM-dd HH:mm:ss.fff zzz} [{Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}",
+        theme: ConsoleTheme.None);
 }
-builder.Services.AddSingleton(new ConsoleColorOptions { Enabled = builder.Environment.IsDevelopment() });
+Log.Logger = loggerConfiguration.CreateLogger();
+builder.Logging.AddSerilog(Log.Logger, dispose: true);
 builder.Services.Configure<BingXOptions>(builder.Configuration.GetSection(BingXOptions.SectionName));
 builder.Services.Configure<StrategyOptions>(builder.Configuration.GetSection(StrategyOptions.SectionName));
 builder.Services.Configure<RiskOptions>(builder.Configuration.GetSection(RiskOptions.SectionName));
+builder.Services.Configure<PaperTradingOptions>(builder.Configuration.GetSection(PaperTradingOptions.SectionName));
 builder.Services.Configure<OpenAIOptions>(builder.Configuration.GetSection(OpenAIOptions.SectionName));
 builder.Services.Configure<PersistenceOptions>(builder.Configuration.GetSection(PersistenceOptions.SectionName));
 builder.Services.PostConfigure<BingXOptions>(options =>
@@ -94,6 +99,7 @@ builder.Services.AddSingleton<Channel<MarketUpdate>>(_ => Channel.CreateBounded<
     SingleWriter = true
 }));
 builder.Services.AddSingleton<ICandleStore, InMemoryCandleStore>();
+builder.Services.AddSingleton<IContractStore, InMemoryContractStore>();
 builder.Services.AddSingleton<ITradeStore>(serviceProvider =>
 {
     var persistenceOptions = serviceProvider.GetRequiredService<Microsoft.Extensions.Options.IOptions<PersistenceOptions>>();

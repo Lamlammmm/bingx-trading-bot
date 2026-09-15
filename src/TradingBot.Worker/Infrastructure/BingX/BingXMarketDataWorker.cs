@@ -9,7 +9,7 @@ using TradingBot.Worker.Domain;
 namespace TradingBot.Worker.Infrastructure.BingX;
 
 public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBingXMarketStream marketStream,
-    ICandleStore candleStore, Channel<MarketUpdate> updates, IOptions<BingXOptions> options,
+    ICandleStore candleStore, IContractStore contractStore, Channel<MarketUpdate> updates, IOptions<BingXOptions> options,
     ILogger<BingXMarketDataWorker> logger) : BackgroundService
 {
     private readonly BingXOptions _options = options.Value;
@@ -19,12 +19,20 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        await LoadHistoryAsync(stoppingToken);
+        var activeSymbols = await LoadHistoryAsync(stoppingToken);
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await marketStream.StreamAsync(_options.Symbols, async update =>
+                if (activeSymbols.Count == 0)
+                {
+                    logger.LogError("No valid BingX symbols are available; retrying symbol validation in {DelaySeconds}s", _options.ReconnectDelaySeconds);
+                    await Task.Delay(TimeSpan.FromSeconds(_options.ReconnectDelaySeconds), stoppingToken);
+                    activeSymbols = await LoadHistoryAsync(stoppingToken);
+                    continue;
+                }
+
+                await marketStream.StreamAsync(activeSymbols, async update =>
                 {
                     var closedUpdate = _closedCandleTracker.Observe(update);
                     if (closedUpdate is not null)
@@ -45,7 +53,7 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
                 await Task.Delay(TimeSpan.FromSeconds(_options.ReconnectDelaySeconds), stoppingToken);
                 try
                 {
-                    await LoadHistoryAsync(stoppingToken);
+                    activeSymbols = await LoadHistoryAsync(stoppingToken);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -59,12 +67,26 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
         }
     }
 
-    private async Task LoadHistoryAsync(CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<string>> LoadHistoryAsync(CancellationToken cancellationToken)
     {
+        var activeSymbols = new List<string>();
         foreach (var symbol in _options.Symbols)
         {
-            await LoadHistoryForSymbolAsync(symbol, cancellationToken);
+            try
+            {
+                await LoadHistoryForSymbolAsync(symbol, cancellationToken);
+                activeSymbols.Add(symbol);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Skipping unavailable BingX symbol {Symbol}; other symbols will continue", symbol);
+            }
         }
+        return activeSymbols;
     }
 
     private async Task LoadHistoryForSymbolAsync(string symbol, CancellationToken cancellationToken)
@@ -74,6 +96,7 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
             throw new InvalidOperationException($"BingX contract {symbol} is missing or inactive.");
         logger.LogInformation("BingX contract {Symbol}: minQty={MinimumQuantity}, minValue={MinimumOrderValue} USDT, pricePrecision={PricePrecision}",
             contract.Symbol, contract.MinimumQuantity, contract.MinimumOrderValue, contract.PricePrecision);
+        contractStore.Upsert(symbol, contract);
 
         var loadedHistory = new Dictionary<TimeFrame, IReadOnlyList<Candle>>();
         foreach (var timeFrame in new[] { TimeFrame.FifteenMinutes, TimeFrame.OneHour, TimeFrame.FourHours })
@@ -100,18 +123,20 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 
             if (timeFrame == TimeFrame.FifteenMinutes)
             {
-                // Reconcile only the newest missed 15m candle. Replaying multiple candles through a
-                // shared store would evaluate old updates against future 1h/4h context.
                 if (_lastPublishedOpenTimes.TryGetValue((symbol, timeFrame), out var lastPublished))
                 {
-                    var missedCount = candles.Count(candle => candle.OpenTime > lastPublished);
-                    if (missedCount > 1)
+                    var missedCandles = candles.Where(candle => candle.OpenTime > lastPublished).ToArray();
+                    if (missedCandles.Length > 0)
                     {
-                        logger.LogWarning("BingX reconnect missed {MissedCount} closed 15m candles for {Symbol}; reconciling only the latest and skipping {SkippedCount} intermediate candles",
-                            missedCount, symbol, missedCount - 1);
+                        logger.LogWarning("BingX reconnect missed {MissedCount} closed 15m candles for {Symbol}; replaying them for paper position protection and skipping new entries during reconciliation",
+                            missedCandles.Length, symbol);
+                        foreach (var missedCandle in missedCandles)
+                        {
+                            await PublishClosedCandleAsync(new MarketUpdate(symbol, timeFrame,
+                                missedCandle with { IsClosed = true }, IsReconciliation: true), cancellationToken);
+                        }
                     }
                 }
-                await PublishClosedCandleAsync(new MarketUpdate(symbol, timeFrame, latest with { IsClosed = true }), cancellationToken);
             }
             else if (!_lastPublishedOpenTimes.TryGetValue((symbol, timeFrame), out var lastPublished) || latest.OpenTime > lastPublished)
             {

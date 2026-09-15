@@ -101,6 +101,8 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
             var interval = dataType[(separatorIndex + 7)..];
             var timeFrame = interval switch
             {
+                "1m" => TimeFrame.OneMinute,
+                "5m" => TimeFrame.FiveMinutes,
                 "15m" => TimeFrame.FifteenMinutes,
                 "1h" => TimeFrame.OneHour,
                 "4h" => TimeFrame.FourHours,
@@ -155,6 +157,8 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
 
     private static TimeSpan GetDuration(TimeFrame timeFrame) => timeFrame switch
     {
+        TimeFrame.OneMinute => TimeSpan.FromMinutes(1),
+        TimeFrame.FiveMinutes => TimeSpan.FromMinutes(5),
         TimeFrame.FifteenMinutes => TimeSpan.FromMinutes(15),
         TimeFrame.OneHour => TimeSpan.FromHours(1),
         TimeFrame.FourHours => TimeSpan.FromHours(4),

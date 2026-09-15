@@ -1,10 +1,5 @@
 namespace TradingBot.Worker.Configuration;
 
-public sealed class ConsoleColorOptions
-{
-    public bool Enabled { get; init; }
-}
-
 public sealed class BingXOptions
 {
     public const string SectionName = "BingX";
@@ -29,10 +24,11 @@ public sealed class StrategyOptions
     public decimal VolumeMultiplier { get; set; } = 1.2m;
     public int AtrPeriod { get; set; } = 14;
     public int RsiPeriod { get; set; } = 14;
-    public decimal RsiOverbought { get; set; } = 75m;
-    public decimal RsiOversold { get; set; } = 25m;
+    public decimal RsiOverbought { get; set; } = 65m;
+    public decimal RsiOversold { get; set; } = 35m;
     public decimal MinimumBodyRatio { get; set; } = 0.5m;
-    public int SignalCooldownBars { get; set; } = 4;
+    public int SignalCooldownBars { get; set; } = 12;
+    public int RetestConfirmationBars { get; set; } = 3;
 }
 
 public sealed class RiskOptions
@@ -41,7 +37,7 @@ public sealed class RiskOptions
     public decimal StartingBalance { get; set; } = 10_000m;
     public decimal RiskPerTradePercent { get; set; } = 0.5m;
     public decimal MaxDailyLossPercent { get; set; } = 2m;
-    public decimal MaxLeverage { get; set; } = 3m;
+    public decimal MaxLeverage { get; set; } = 20m;
     public decimal StopAtrMultiplier { get; set; } = 1.5m;
     public decimal TakeProfitRiskMultiple { get; set; } = 2m;
     public decimal FeeRate { get; set; } = 0.0005m;
@@ -49,6 +45,10 @@ public sealed class RiskOptions
     public decimal MaximumStopAtrMultiplier { get; set; } = 3m;
     public decimal MinimumTakeProfitRiskMultiple { get; set; } = 1.5m;
     public decimal MaxAggregateOpenRiskPercent { get; set; } = 2m;
+    public decimal TargetProfitUsdt { get; set; } = 1m;
+    public bool UseFixedPercentSlTp { get; set; }
+    public decimal TakeProfitMarginPercent { get; set; } = 50m;
+    public decimal StopLossMarginPercent { get; set; } = 25m;
 }
 
 public sealed class PersistenceOptions
@@ -57,6 +57,14 @@ public sealed class PersistenceOptions
     public string Provider { get; set; } = "Sqlite";
     public string DatabasePath { get; set; } = "data/tradingbot.db";
     public string? ConnectionString { get; set; }
+}
+
+public sealed class PaperTradingOptions
+{
+    public const string SectionName = "PaperTrading";
+    public decimal SlippageBasisPoints { get; set; } = 2m;
+    public decimal FundingRatePerEightHours { get; set; }
+    public int MaxHoldingMinutes { get; set; } = 60;
 }
 
 public sealed class OpenAIOptions

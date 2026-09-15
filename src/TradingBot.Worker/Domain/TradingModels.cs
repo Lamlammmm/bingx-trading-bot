@@ -1,6 +1,6 @@
 namespace TradingBot.Worker.Domain;
 
-public enum TimeFrame { FifteenMinutes, OneHour, FourHours }
+public enum TimeFrame { OneMinute, FiveMinutes, FifteenMinutes, OneHour, FourHours }
 public enum TradeDirection { Long, Short }
 
 public sealed record Candle(
@@ -13,7 +13,7 @@ public sealed record Candle(
     decimal Volume,
     bool IsClosed);
 
-public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle);
+public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle, bool IsReconciliation = false);
 
 public sealed record StrategySignal(
     string Symbol,
@@ -30,9 +30,9 @@ public sealed record StrategySignal(
 public sealed record AiAnalysisContext(
     string Symbol,
     DateTimeOffset CandleTime,
-    IReadOnlyList<Candle> FifteenMinuteCandles,
-    IReadOnlyList<Candle> OneHourCandles,
-    IReadOnlyList<Candle> FourHourCandles,
+    IReadOnlyList<Candle> EntryCandles,
+    IReadOnlyList<Candle> MediumTrendCandles,
+    IReadOnlyList<Candle> HigherTrendCandles,
     StrategySignal? TechnicalSignal);
 
 public sealed record AiDecision(
@@ -62,14 +62,14 @@ public sealed record TradePlan(
     string Reason);
 
 public sealed record TradeFeatures(
+    decimal Rsi5m,
     decimal Rsi15m,
     decimal Rsi1h,
-    decimal Rsi4h,
-    decimal Atr15m,
-    decimal EmaFast15m,
-    decimal EmaSlow15m,
-    decimal VolumeRatio15m,
-    decimal BodyRatio15m,
+    decimal Atr5m,
+    decimal EmaFast5m,
+    decimal EmaSlow5m,
+    decimal VolumeRatio5m,
+    decimal BodyRatio5m,
     decimal Confidence,
     int HourOfDayUtc,
     int DayOfWeekUtc);
@@ -97,7 +97,10 @@ public sealed record ContractInfo(
 public sealed record AccountState(
     decimal Balance,
     DateOnly BalanceDate,
-    decimal RealizedPnlToday);
+    decimal RealizedPnlToday,
+    int TotalWins = 0,
+    int TotalLosses = 0,
+    decimal TotalNetPnl = 0m);
 
 public sealed record ClosedTrade(
     string Symbol,

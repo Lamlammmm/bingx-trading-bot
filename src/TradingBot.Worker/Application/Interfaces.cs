@@ -8,6 +8,12 @@ public interface ICandleStore
     IReadOnlyList<Candle> Get(string symbol, TimeFrame timeFrame);
 }
 
+public interface IContractStore
+{
+    void Upsert(string symbol, ContractInfo contract);
+    ContractInfo? Get(string symbol);
+}
+
 public interface IBingXMarketClient
 {
     Task<IReadOnlyList<Candle>> GetCandlesAsync(string symbol, TimeFrame timeFrame, int limit, CancellationToken cancellationToken);
@@ -21,14 +27,14 @@ public interface IBingXMarketStream
 
 public interface ITradingStrategy
 {
-    StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> fifteenMinuteCandles,
-        IReadOnlyList<Candle> oneHourCandles, IReadOnlyList<Candle> fourHourCandles);
+    StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> entryCandles,
+        IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles);
 }
 
 public interface IRiskManager
 {
     TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition,
-        decimal realizedPnlToday, decimal aggregateOpenRisk);
+        decimal realizedPnlToday, decimal aggregateOpenRisk, ContractInfo? contract);
 }
 
 public interface IOpenAiAnalyzer
@@ -42,5 +48,7 @@ public interface ITradeStore
     Task InitializeAsync(CancellationToken cancellationToken);
     Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken);
     Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken);
+    Task<IReadOnlyList<PaperPosition>> LoadOpenPositionsAsync(CancellationToken cancellationToken);
+    Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, CancellationToken cancellationToken);
     Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken);
 }

@@ -7,14 +7,11 @@ using TradingBot.Worker.Domain;
 namespace TradingBot.Worker.Infrastructure.PaperTrading;
 
 public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrategy strategy, IRiskManager riskManager,
-    IOpenAiAnalyzer openAiAnalyzer, ITradeStore tradeStore, IOptions<RiskOptions> riskOptions,
+    IOpenAiAnalyzer openAiAnalyzer, ITradeStore tradeStore, IContractStore contractStore, IOptions<RiskOptions> riskOptions,
+    IOptions<PaperTradingOptions> paperTradingOptions,
     IOptions<OpenAIOptions> openAiOptions, IOptions<StrategyOptions> strategyOptions,
-    ConsoleColorOptions colorOptions, ILogger<PaperTradingEngine> logger)
+    ILogger<PaperTradingEngine> logger)
 {
-    private const string AnsiReset = "\x1b[0m";
-    private const string AnsiGray = "\x1b[90m";
-    private const string AnsiGreen = "\x1b[92m";
-    private const string AnsiRed = "\x1b[91m";
     private static readonly EventId AiTradeEvent = new(2_100, "AiTrade");
     private static readonly EventId AiNoTradeEvent = new(2_101, "AiNoTrade");
     private static readonly EventId AiErrorEvent = new(2_102, "AiError");
@@ -22,6 +19,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
     private static readonly EventId RuleRejectedEvent = new(2_201, "RuleRejected");
     private static readonly EventId RuleNoSignalEvent = new(2_202, "RuleNoSignal");
     private readonly RiskOptions _riskOptions = riskOptions.Value;
+    private readonly PaperTradingOptions _paperOptions = paperTradingOptions.Value;
     private readonly OpenAIOptions _openAiOptions = openAiOptions.Value;
     private readonly StrategyOptions _strategyOptions = strategyOptions.Value;
     private readonly Dictionary<string, PaperPosition?> _positionsBySymbol = new();
@@ -43,6 +41,9 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             _balance = _riskOptions.StartingBalance;
             _balanceDate = today;
             _realizedPnlToday = 0m;
+            _totalWins = 0;
+            _totalLosses = 0;
+            _totalNetPnl = 0m;
             logger.LogInformation("Paper trading initialized with balance {Balance} USDT (no persisted state found)", _balance);
         }
         else
@@ -50,8 +51,18 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             _balance = persisted.Balance;
             _balanceDate = today;
             _realizedPnlToday = persisted.BalanceDate == today ? persisted.RealizedPnlToday : 0m;
+            _totalWins = persisted.TotalWins;
+            _totalLosses = persisted.TotalLosses;
+            _totalNetPnl = persisted.TotalNetPnl;
             logger.LogInformation("Paper trading resumed from persisted state: balance={Balance} USDT, realizedPnlToday={RealizedPnlToday}",
                 _balance, _realizedPnlToday);
+        }
+
+        foreach (var position in await tradeStore.LoadOpenPositionsAsync(cancellationToken))
+        {
+            _positionsBySymbol[position.Symbol] = position;
+            logger.LogWarning("PAPER POSITION RESTORED {Direction} {Quantity} {Symbol} @ {Entry}; SL={StopLoss}; TP={TakeProfit}",
+                position.Direction, position.Quantity, position.Symbol, position.EntryPrice, position.StopLoss, position.TakeProfit);
         }
 
         await SaveAccountStateAsync(cancellationToken);
@@ -73,12 +84,16 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             if (await TryClosePositionAsync(symbol, position, update.Candle, cancellationToken)) return;
             return;
         }
+        if (update.IsReconciliation)
+        {
+            logger.LogInformation("Skipping new entry on reconciled closed 15m candle for {Symbol} at {OpenTime}",
+                symbol, update.Candle.OpenTime);
+            return;
+        }
 
         var technicalSignal = strategy.Evaluate(symbol, candleStore.Get(symbol, TimeFrame.FifteenMinutes),
             candleStore.Get(symbol, TimeFrame.OneHour), candleStore.Get(symbol, TimeFrame.FourHours));
-        var signalText = technicalSignal is null
-            ? Colorize("none", AnsiGray)
-            : Colorize(technicalSignal.Direction.ToString(), technicalSignal.Direction == TradeDirection.Long ? AnsiGreen : AnsiRed);
+        var signalText = technicalSignal is null ? "none" : technicalSignal.Direction.ToString();
         logger.LogInformation(RuleNoSignalEvent,
             "Evaluated closed 15m candle for {Symbol}: open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}, technicalSignal={TechnicalSignal}",
             symbol, update.Candle.Open, update.Candle.High, update.Candle.Low, update.Candle.Close, update.Candle.Volume, signalText);
@@ -104,7 +119,20 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         if (signal is null) return;
 
         var aggregateOpenRisk = _positionsBySymbol.Values.Where(p => p is not null).Sum(p => p!.RiskAmount);
-        var plan = riskManager.CreatePlan(signal, _balance, position, _realizedPnlToday, aggregateOpenRisk);
+        var contract = contractStore.Get(symbol);
+        if (contract is null)
+        {
+            logger.LogWarning(RuleRejectedEvent,
+                "========== TRADE REJECTED ========== {Symbol} | reason=contract metadata is unavailable",
+                symbol);
+            return;
+        }
+        var slippageRate = _paperOptions.SlippageBasisPoints / 10_000m;
+        var executionEntryPrice = signal.Direction == TradeDirection.Long
+            ? signal.EntryPrice * (1m + slippageRate)
+            : signal.EntryPrice * (1m - slippageRate);
+        var plan = riskManager.CreatePlan(signal with { EntryPrice = executionEntryPrice }, _balance, position,
+            _realizedPnlToday, aggregateOpenRisk, contract);
         if (plan is null)
         {
             logger.LogWarning(RuleRejectedEvent,
@@ -114,37 +142,39 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         }
 
         _balance -= plan.EntryFee;
-        var entryFeatures = BuildEntryFeatures(symbol, signal);
+        var entryFeatures = BuildEntryFeatures(symbol, signal with { EntryPrice = plan.EntryPrice });
         _positionsBySymbol[symbol] = new PaperPosition(plan.Symbol, plan.Direction, plan.Quantity, plan.EntryPrice, plan.StopLoss,
             plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures);
         logger.LogWarning("========== PAPER OPEN {Direction} ========== {Quantity} {Symbol} @ {Entry}; SL={StopLoss}; TP={TakeProfit}; risk={Risk}; source={Source}; reason={Reason}",
             plan.Direction, plan.Quantity, plan.Symbol, plan.EntryPrice, plan.StopLoss, plan.TakeProfit, plan.RiskAmount, signal.Source, plan.Reason);
+        await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
         await SaveAccountStateAsync(cancellationToken);
     }
 
     private Task SaveAccountStateAsync(CancellationToken cancellationToken) =>
-        tradeStore.SaveAccountStateAsync(new AccountState(_balance, _balanceDate, _realizedPnlToday), cancellationToken);
-
-    private string Colorize(string text, string ansiColor) => colorOptions.Enabled ? $"{ansiColor}{text}{AnsiReset}" : text;
+        tradeStore.SaveAccountStateAsync(new AccountState(_balance, _balanceDate, _realizedPnlToday,
+            _totalWins, _totalLosses, _totalNetPnl), cancellationToken);
 
     private TradeFeatures BuildEntryFeatures(string symbol, StrategySignal signal)
     {
-        var fifteenMinuteCandles = candleStore.Get(symbol, TimeFrame.FifteenMinutes);
-        var oneHourCandles = candleStore.Get(symbol, TimeFrame.OneHour);
-        var fourHourCandles = candleStore.Get(symbol, TimeFrame.FourHours);
-        var lastCandle = fifteenMinuteCandles.Count > 0 ? fifteenMinuteCandles[^1] : null;
-        var averageVolume = TechnicalIndicators.AverageVolume(fifteenMinuteCandles, _strategyOptions.VolumeLookback);
+        // Note: TradeFeatures/DB column names still say 5m/15m/1h for historical reasons, but since the
+        // entry/medium/higher timeframes moved to 15m/1h/4h, these now carry that data instead.
+        var entryCandles = candleStore.Get(symbol, TimeFrame.FifteenMinutes);
+        var mediumTrendCandles = candleStore.Get(symbol, TimeFrame.OneHour);
+        var higherTrendCandles = candleStore.Get(symbol, TimeFrame.FourHours);
+        var lastCandle = entryCandles.Count > 0 ? entryCandles[^1] : null;
+        var averageVolume = TechnicalIndicators.AverageVolume(entryCandles, _strategyOptions.VolumeLookback);
         var volumeRatio = lastCandle is not null && averageVolume > 0m ? lastCandle.Volume / averageVolume : 0m;
 
         return new TradeFeatures(
-            Rsi15m: TechnicalIndicators.Rsi(fifteenMinuteCandles, _strategyOptions.RsiPeriod),
-            Rsi1h: TechnicalIndicators.Rsi(oneHourCandles, _strategyOptions.RsiPeriod),
-            Rsi4h: TechnicalIndicators.Rsi(fourHourCandles, _strategyOptions.RsiPeriod),
-            Atr15m: signal.Atr,
-            EmaFast15m: TechnicalIndicators.Ema(fifteenMinuteCandles, _strategyOptions.FastEmaPeriod),
-            EmaSlow15m: TechnicalIndicators.Ema(fifteenMinuteCandles, _strategyOptions.SlowEmaPeriod),
-            VolumeRatio15m: volumeRatio,
-            BodyRatio15m: lastCandle is not null ? TechnicalIndicators.BodyRatio(lastCandle) : 0m,
+            Rsi5m: TechnicalIndicators.Rsi(entryCandles, _strategyOptions.RsiPeriod),
+            Rsi15m: TechnicalIndicators.Rsi(mediumTrendCandles, _strategyOptions.RsiPeriod),
+            Rsi1h: TechnicalIndicators.Rsi(higherTrendCandles, _strategyOptions.RsiPeriod),
+            Atr5m: signal.Atr,
+            EmaFast5m: TechnicalIndicators.Ema(entryCandles, _strategyOptions.FastEmaPeriod),
+            EmaSlow5m: TechnicalIndicators.Ema(entryCandles, _strategyOptions.SlowEmaPeriod),
+            VolumeRatio5m: volumeRatio,
+            BodyRatio5m: lastCandle is not null ? TechnicalIndicators.BodyRatio(lastCandle) : 0m,
             Confidence: signal.Confidence,
             HourOfDayUtc: signal.Time.UtcDateTime.Hour,
             DayOfWeekUtc: (int)signal.Time.UtcDateTime.DayOfWeek);
@@ -179,6 +209,14 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             logger.LogInformation(AiNoTradeEvent,
                 "========== AI RESULT: NO_TRADE ========== {Symbol} | confidence={Confidence:P0} | reason={Reason} | invalidation={Invalidation}",
                 symbol, decision.Confidence, decision.Reason, decision.Invalidation);
+            return null;
+        }
+
+        if (technicalSignal is null)
+        {
+            logger.LogInformation(AiNoTradeEvent,
+                "========== AI RESULT: NO_TRADE ========== {Symbol} | reason=technical signal gate did not pass",
+                symbol);
             return null;
         }
 
@@ -219,26 +257,40 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         else if (candle.High >= position.StopLoss) { exitPrice = position.StopLoss; exitReason = "SL"; }
         else if (candle.Low <= position.TakeProfit) { exitPrice = position.TakeProfit; exitReason = "TP"; }
 
+        if (exitPrice is null && _paperOptions.MaxHoldingMinutes > 0 &&
+            candle.CloseTime >= position.OpenedAt.AddMinutes(_paperOptions.MaxHoldingMinutes))
+        {
+            exitPrice = candle.Close;
+            exitReason = "TIME_EXIT";
+        }
+
         if (exitPrice is null) return false;
         var directionMultiplier = position.Direction == TradeDirection.Long ? 1m : -1m;
-        var grossPnl = (exitPrice.Value - position.EntryPrice) * position.Quantity * directionMultiplier;
-        var exitFee = exitPrice.Value * position.Quantity * _riskOptions.FeeRate;
-        var netPnl = grossPnl - position.EntryFee - exitFee;
-        _balance += grossPnl - exitFee;
+        var slippageRate = _paperOptions.SlippageBasisPoints / 10_000m;
+        var executionExitPrice = position.Direction == TradeDirection.Long
+            ? exitPrice.Value * (1m - slippageRate)
+            : exitPrice.Value * (1m + slippageRate);
+        var grossPnl = (executionExitPrice - position.EntryPrice) * position.Quantity * directionMultiplier;
+        var exitFee = executionExitPrice * position.Quantity * _riskOptions.FeeRate;
+        var fundingPeriods = Math.Max(0m, (decimal)Math.Floor((candle.CloseTime - position.OpenedAt).TotalHours / 8d));
+        var fundingFee = position.EntryPrice * position.Quantity * _paperOptions.FundingRatePerEightHours * fundingPeriods * directionMultiplier;
+        var netPnl = grossPnl - position.EntryFee - exitFee - fundingFee;
+        _balance += grossPnl - exitFee - fundingFee;
         _realizedPnlToday += netPnl;
         if (netPnl >= 0m) _totalWins++; else _totalLosses++;
         _totalNetPnl += netPnl;
-        logger.LogInformation("PAPER CLOSE {Reason} {Direction} {Quantity} {Symbol} @ {Exit}; netPnl={NetPnl}; balance={Balance}",
-            exitReason, position.Direction, position.Quantity, position.Symbol, exitPrice.Value, netPnl, _balance);
+        logger.LogWarning("PAPER CLOSE {Reason} {Direction} {Quantity} {Symbol} @ {Exit}; funding={Funding}; netPnl={NetPnl}; balance={Balance}",
+            exitReason, position.Direction, position.Quantity, position.Symbol, executionExitPrice, fundingFee, netPnl, _balance);
 
         var totalTrades = _totalWins + _totalLosses;
         var winRate = totalTrades == 0 ? 0m : (decimal)_totalWins / totalTrades;
-        logger.LogInformation("PERFORMANCE totalTrades={TotalTrades}; wins={Wins}; losses={Losses}; winRate={WinRate:P0}; totalNetPnl={TotalNetPnl}; balance={Balance}",
+        logger.LogWarning("PERFORMANCE totalTrades={TotalTrades}; wins={Wins}; losses={Losses}; winRate={WinRate:P0}; totalNetPnl={TotalNetPnl}; balance={Balance}",
             totalTrades, _totalWins, _totalLosses, winRate, _totalNetPnl, _balance);
         _positionsBySymbol[symbol] = null;
 
+        await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
         await tradeStore.RecordClosedTradeAsync(new ClosedTrade(position.Symbol, position.Direction, position.Quantity,
-            position.EntryPrice, exitPrice.Value, position.StopLoss, position.TakeProfit, netPnl, exitReason,
+            position.EntryPrice, executionExitPrice, position.StopLoss, position.TakeProfit, netPnl, exitReason,
             "paper", position.OpenedAt, candle.CloseTime, position.EntryFeatures), cancellationToken);
         await SaveAccountStateAsync(cancellationToken);
         return true;
