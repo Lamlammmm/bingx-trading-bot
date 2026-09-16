@@ -78,6 +78,14 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             """;
         await createOpenPositions.ExecuteNonQueryAsync(cancellationToken);
 
+        await using var alterOpenPositions = connection.CreateCommand();
+        alterOpenPositions.CommandText = """
+            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS initial_stop_loss NUMERIC NULL;
+            ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS partial_taken BOOLEAN NOT NULL DEFAULT FALSE;
+            UPDATE open_positions SET initial_stop_loss = stop_loss WHERE initial_stop_loss IS NULL;
+            """;
+        await alterOpenPositions.ExecuteNonQueryAsync(cancellationToken);
+
         await using var createClosedTrades = connection.CreateCommand();
         createClosedTrades.CommandText = """
             CREATE TABLE IF NOT EXISTS closed_trades (
@@ -171,16 +179,18 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features FROM open_positions;";
+        command.CommandText = "SELECT symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken FROM open_positions;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var positions = new List<PaperPosition>();
         while (await reader.ReadAsync(cancellationToken))
         {
             var featuresJson = reader.IsDBNull(9) ? null : reader.GetString(9);
+            var stopLoss = reader.GetDecimal(4);
             positions.Add(new PaperPosition(reader.GetString(0), Enum.Parse<TradeDirection>(reader.GetString(1)),
-                reader.GetDecimal(2), reader.GetDecimal(3), reader.GetDecimal(4), reader.GetDecimal(5),
+                reader.GetDecimal(2), reader.GetDecimal(3), stopLoss, reader.GetDecimal(5),
                 reader.GetDecimal(6), reader.GetDecimal(7), reader.GetFieldValue<DateTimeOffset>(8),
-                featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson)));
+                featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson),
+                reader.IsDBNull(10) ? stopLoss : reader.GetDecimal(10), reader.GetBoolean(11)));
         }
         return positions;
     }
@@ -203,8 +213,8 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO open_positions
-                    (symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features)
-                VALUES (@symbol, @direction, @quantity, @entryPrice, @stopLoss, @takeProfit, @riskAmount, @entryFee, @openedAt, @entryFeatures);
+                    (symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken)
+                VALUES (@symbol, @direction, @quantity, @entryPrice, @stopLoss, @takeProfit, @riskAmount, @entryFee, @openedAt, @entryFeatures, @initialStopLoss, @partialTaken);
                 """;
             insert.Parameters.AddWithValue("symbol", position.Symbol);
             insert.Parameters.AddWithValue("direction", position.Direction.ToString());
@@ -216,6 +226,8 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             insert.Parameters.AddWithValue("entryFee", position.EntryFee);
             insert.Parameters.AddWithValue("openedAt", position.OpenedAt.UtcDateTime);
             insert.Parameters.AddWithValue("entryFeatures", (object?)JsonSerializer.Serialize(position.EntryFeatures) ?? DBNull.Value);
+            insert.Parameters.AddWithValue("initialStopLoss", position.InitialStopLoss == 0m ? position.StopLoss : position.InitialStopLoss);
+            insert.Parameters.AddWithValue("partialTaken", position.PartialTaken);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);

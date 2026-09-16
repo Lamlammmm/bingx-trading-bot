@@ -144,7 +144,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         _balance -= plan.EntryFee;
         var entryFeatures = BuildEntryFeatures(symbol, signal with { EntryPrice = plan.EntryPrice });
         _positionsBySymbol[symbol] = new PaperPosition(plan.Symbol, plan.Direction, plan.Quantity, plan.EntryPrice, plan.StopLoss,
-            plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures);
+            plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures, InitialStopLoss: plan.StopLoss);
         logger.LogWarning("========== PAPER OPEN {Direction} ========== {Quantity} {Symbol} @ {Entry}; SL={StopLoss}; TP={TakeProfit}; risk={Risk}; source={Source}; reason={Reason}",
             plan.Direction, plan.Quantity, plan.Symbol, plan.EntryPrice, plan.StopLoss, plan.TakeProfit, plan.RiskAmount, signal.Source, plan.Reason);
         await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
@@ -245,8 +245,61 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             decision.StopLoss, decision.TakeProfit, decision.Confidence, "openai");
     }
 
+    private async Task ApplyPartialTakeProfitAsync(string symbol, PaperPosition position, decimal partialPrice, CancellationToken cancellationToken)
+    {
+        var partialQuantity = position.Quantity * (_riskOptions.PartialTakeProfitPercent / 100m);
+        if (partialQuantity <= 0m) return;
+
+        var directionMultiplier = position.Direction == TradeDirection.Long ? 1m : -1m;
+        var slippageRate = _paperOptions.SlippageBasisPoints / 10_000m;
+        var executionPrice = position.Direction == TradeDirection.Long
+            ? partialPrice * (1m - slippageRate)
+            : partialPrice * (1m + slippageRate);
+        var grossPnl = (executionPrice - position.EntryPrice) * partialQuantity * directionMultiplier;
+        var exitFee = executionPrice * partialQuantity * _riskOptions.FeeRate;
+        var netPnl = grossPnl - exitFee;
+        _balance += grossPnl - exitFee;
+        _realizedPnlToday += netPnl;
+        _totalNetPnl += netPnl;
+
+        var remainingQuantity = position.Quantity - partialQuantity;
+        var updatedPosition = position with
+        {
+            Quantity = remainingQuantity,
+            StopLoss = position.EntryPrice,
+            RiskAmount = 0m,
+            PartialTaken = true
+        };
+        _positionsBySymbol[symbol] = updatedPosition;
+        logger.LogWarning(
+            "========== PAPER PARTIAL TP {Direction} ========== {PartialQuantity} {Symbol} @ {Exit}; remainingQty={RemainingQuantity}; SL moved to breakeven={Breakeven}; netPnl={NetPnl}; balance={Balance}",
+            position.Direction, partialQuantity, symbol, executionPrice, remainingQuantity, position.EntryPrice, netPnl, _balance);
+
+        await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
+        await SaveAccountStateAsync(cancellationToken);
+    }
+
     private async Task<bool> TryClosePositionAsync(string symbol, PaperPosition position, Candle candle, CancellationToken cancellationToken)
     {
+        if (_riskOptions.UsePartialTakeProfit && !position.PartialTaken)
+        {
+            var riskPerUnit = Math.Abs(position.EntryPrice - position.InitialStopLoss);
+            if (riskPerUnit > 0m)
+            {
+                var partialTarget = position.Direction == TradeDirection.Long
+                    ? position.EntryPrice + riskPerUnit * _riskOptions.PartialTakeProfitRMultiple
+                    : position.EntryPrice - riskPerUnit * _riskOptions.PartialTakeProfitRMultiple;
+                var partialHit = position.Direction == TradeDirection.Long
+                    ? candle.High >= partialTarget
+                    : candle.Low <= partialTarget;
+                if (partialHit)
+                {
+                    await ApplyPartialTakeProfitAsync(symbol, position, partialTarget, cancellationToken);
+                    return false;
+                }
+            }
+        }
+
         decimal? exitPrice = null;
         var exitReason = string.Empty;
         if (position.Direction == TradeDirection.Long)

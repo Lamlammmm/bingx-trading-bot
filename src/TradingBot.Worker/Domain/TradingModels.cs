@@ -84,7 +84,9 @@ public sealed record PaperPosition(
     decimal RiskAmount,
     decimal EntryFee,
     DateTimeOffset OpenedAt,
-    TradeFeatures? EntryFeatures = null);
+    TradeFeatures? EntryFeatures = null,
+    decimal InitialStopLoss = 0m,
+    bool PartialTaken = false);
 
 public sealed record ContractInfo(
     string Symbol,

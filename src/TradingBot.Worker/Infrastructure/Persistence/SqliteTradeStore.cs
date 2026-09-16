@@ -63,6 +63,22 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             """;
         await createOpenPositions.ExecuteNonQueryAsync(cancellationToken);
 
+        await using var openPositionColumnsCommand = connection.CreateCommand();
+        openPositionColumnsCommand.CommandText = "PRAGMA table_info(OpenPositions);";
+        var openPositionColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        await using (var reader = await openPositionColumnsCommand.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken)) openPositionColumns.Add(reader.GetString(1));
+        foreach (var (name, sqlType) in new[] { ("InitialStopLoss", "TEXT"), ("PartialTaken", "INTEGER NOT NULL DEFAULT 0") })
+        {
+            if (openPositionColumns.Contains(name)) continue;
+            await using var alter = connection.CreateCommand();
+            alter.CommandText = $"ALTER TABLE OpenPositions ADD COLUMN {name} {sqlType};";
+            await alter.ExecuteNonQueryAsync(cancellationToken);
+        }
+        await using var backfillInitialStopLoss = connection.CreateCommand();
+        backfillInitialStopLoss.CommandText = "UPDATE OpenPositions SET InitialStopLoss = StopLoss WHERE InitialStopLoss IS NULL;";
+        await backfillInitialStopLoss.ExecuteNonQueryAsync(cancellationToken);
+
         await using var createClosedTrades = connection.CreateCommand();
         createClosedTrades.CommandText = """
             CREATE TABLE IF NOT EXISTS ClosedTrades (
@@ -165,21 +181,26 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures FROM OpenPositions;";
+        command.CommandText = "SELECT Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken FROM OpenPositions;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        var invariant = System.Globalization.CultureInfo.InvariantCulture;
         var positions = new List<PaperPosition>();
         while (await reader.ReadAsync(cancellationToken))
         {
             var featuresJson = reader.IsDBNull(9) ? null : reader.GetString(9);
+            var stopLoss = decimal.Parse(reader.GetString(4), invariant);
+            var initialStopLoss = reader.IsDBNull(10) ? stopLoss : decimal.Parse(reader.GetString(10), invariant);
+            var partialTaken = !reader.IsDBNull(11) && reader.GetInt64(11) != 0;
             positions.Add(new PaperPosition(reader.GetString(0), Enum.Parse<TradeDirection>(reader.GetString(1)),
-                decimal.Parse(reader.GetString(2), System.Globalization.CultureInfo.InvariantCulture),
-                decimal.Parse(reader.GetString(3), System.Globalization.CultureInfo.InvariantCulture),
-                decimal.Parse(reader.GetString(4), System.Globalization.CultureInfo.InvariantCulture),
-                decimal.Parse(reader.GetString(5), System.Globalization.CultureInfo.InvariantCulture),
-                decimal.Parse(reader.GetString(6), System.Globalization.CultureInfo.InvariantCulture),
-                decimal.Parse(reader.GetString(7), System.Globalization.CultureInfo.InvariantCulture),
-                DateTimeOffset.Parse(reader.GetString(8), System.Globalization.CultureInfo.InvariantCulture),
-                featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson)));
+                decimal.Parse(reader.GetString(2), invariant),
+                decimal.Parse(reader.GetString(3), invariant),
+                stopLoss,
+                decimal.Parse(reader.GetString(5), invariant),
+                decimal.Parse(reader.GetString(6), invariant),
+                decimal.Parse(reader.GetString(7), invariant),
+                DateTimeOffset.Parse(reader.GetString(8), invariant),
+                featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson),
+                initialStopLoss, partialTaken));
         }
         return positions;
     }
@@ -202,8 +223,8 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             insert.Transaction = (SqliteTransaction)transaction;
             insert.CommandText = """
                 INSERT INTO OpenPositions
-                    (Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures)
-                VALUES ($symbol, $direction, $quantity, $entryPrice, $stopLoss, $takeProfit, $riskAmount, $entryFee, $openedAt, $entryFeatures);
+                    (Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken)
+                VALUES ($symbol, $direction, $quantity, $entryPrice, $stopLoss, $takeProfit, $riskAmount, $entryFee, $openedAt, $entryFeatures, $initialStopLoss, $partialTaken);
                 """;
             var invariant = System.Globalization.CultureInfo.InvariantCulture;
             insert.Parameters.AddWithValue("$symbol", position.Symbol);
@@ -216,6 +237,8 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             insert.Parameters.AddWithValue("$entryFee", position.EntryFee.ToString(invariant));
             insert.Parameters.AddWithValue("$openedAt", position.OpenedAt.ToString("O"));
             insert.Parameters.AddWithValue("$entryFeatures", (object?)JsonSerializer.Serialize(position.EntryFeatures) ?? DBNull.Value);
+            insert.Parameters.AddWithValue("$initialStopLoss", (position.InitialStopLoss == 0m ? position.StopLoss : position.InitialStopLoss).ToString(invariant));
+            insert.Parameters.AddWithValue("$partialTaken", position.PartialTaken ? 1 : 0);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
         await transaction.CommitAsync(cancellationToken);

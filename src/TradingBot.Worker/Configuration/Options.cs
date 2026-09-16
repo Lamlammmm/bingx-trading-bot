@@ -49,6 +49,9 @@ public sealed class RiskOptions
     public bool UseFixedPercentSlTp { get; set; }
     public decimal TakeProfitMarginPercent { get; set; } = 50m;
     public decimal StopLossMarginPercent { get; set; } = 25m;
+    public bool UsePartialTakeProfit { get; set; } = true;
+    public decimal PartialTakeProfitRMultiple { get; set; } = 1m;
+    public decimal PartialTakeProfitPercent { get; set; } = 50m;
 }
 
 public sealed class PersistenceOptions
