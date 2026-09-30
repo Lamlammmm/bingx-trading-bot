@@ -22,6 +22,7 @@ public sealed class StrategyOptions
     public int BreakoutLookback { get; set; } = 20;
     public int VolumeLookback { get; set; } = 20;
     public decimal VolumeMultiplier { get; set; } = 1.2m;
+    public decimal MaximumVolumeMultiplier { get; set; } = 3m;
     public int AtrPeriod { get; set; } = 14;
     public int RsiPeriod { get; set; } = 14;
     public decimal RsiOverbought { get; set; } = 65m;
@@ -29,6 +30,7 @@ public sealed class StrategyOptions
     public decimal MinimumBodyRatio { get; set; } = 0.5m;
     public int SignalCooldownBars { get; set; } = 12;
     public int RetestConfirmationBars { get; set; } = 3;
+    public List<string> ExcludedSymbols { get; set; } = new();
 }
 
 public sealed class RiskOptions
@@ -52,6 +54,22 @@ public sealed class RiskOptions
     public bool UsePartialTakeProfit { get; set; } = true;
     public decimal PartialTakeProfitRMultiple { get; set; } = 1m;
     public decimal PartialTakeProfitPercent { get; set; } = 50m;
+}
+
+public sealed class LiveOptions
+{
+    public const string SectionName = "Live";
+    // Off by default. This places REAL orders with REAL money when true - never flip without
+    // understanding the risks documented alongside this feature.
+    public bool Enabled { get; set; }
+    public string StatePath { get; set; } = "data/live-state.json";
+    public decimal Leverage { get; set; } = 5m;
+    public bool AutoLeverage { get; set; }
+    public decimal MaxLeverage { get; set; } = 20m;
+    public int MaxOpenPositions { get; set; } = 1;
+    public decimal StopAtrMultiplier { get; set; } = 1.5m;
+    public decimal TakeProfitRiskMultiple { get; set; } = 2m;
+    public int MaxHoldingMinutes { get; set; } = 60;
 }
 
 public sealed class PersistenceOptions

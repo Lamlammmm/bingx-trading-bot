@@ -86,7 +86,9 @@ public sealed record PaperPosition(
     DateTimeOffset OpenedAt,
     TradeFeatures? EntryFeatures = null,
     decimal InitialStopLoss = 0m,
-    bool PartialTaken = false);
+    bool PartialTaken = false,
+    decimal InitialQuantity = 0m,
+    decimal RealizedPartialPnl = 0m);
 
 public sealed record ContractInfo(
     string Symbol,
@@ -104,6 +106,8 @@ public sealed record AccountState(
     int TotalLosses = 0,
     decimal TotalNetPnl = 0m);
 
+public sealed record TradePerformance(int Wins, int Losses, decimal TotalNetPnl);
+
 public sealed record ClosedTrade(
     string Symbol,
     TradeDirection Direction,
@@ -118,3 +122,10 @@ public sealed record ClosedTrade(
     DateTimeOffset OpenedAt,
     DateTimeOffset ClosedAt,
     TradeFeatures? EntryFeatures = null);
+
+public sealed record StoredPaperTrade(long Id, ClosedTrade Trade, StoredTradeFeatures Features);
+
+public sealed record StoredTradeFeatures(
+    decimal? Rsi5m, decimal? Rsi15m, decimal? Rsi1h, decimal? Atr5m,
+    decimal? EmaFast5m, decimal? EmaSlow5m, decimal? VolumeRatio5m,
+    decimal? BodyRatio5m, decimal? Confidence, int? HourOfDayUtc, int? DayOfWeekUtc);

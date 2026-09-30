@@ -21,7 +21,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
         await socket.ConnectAsync(new Uri(_options.WebSocketUrl), cancellationToken);
         foreach (var symbol in symbols)
         {
-            foreach (var interval in new[] { "15m", "1h", "4h" })
+            foreach (var interval in new[] { "5m", "1h", "4h" })
             {
                 var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{symbol}@kline_{interval}" });
                 await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
@@ -52,7 +52,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
 
             foreach (var update in parsedUpdates)
             {
-                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FifteenMinutes)
+                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FiveMinutes)
                 {
                     logger.LogInformation("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
                         update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,

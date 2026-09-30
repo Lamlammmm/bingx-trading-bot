@@ -17,7 +17,8 @@ public sealed class TradingLogicTests
             BreakoutLookback = 20,
             VolumeLookback = 20,
             VolumeMultiplier = 1.2m,
-            AtrPeriod = 14
+            AtrPeriod = 14,
+            RsiOverbought = 101m
         }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
@@ -28,11 +29,71 @@ public sealed class TradingLogicTests
 
         var lastOpenTime = fiveMinute[^1].CloseTime;
         fiveMinute.Add(new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 130m, 132m, 129m, 131m, 100m, true));
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+
+        lastOpenTime = fiveMinute[^1].CloseTime;
+        fiveMinute.Add(new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
         var signal = strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour);
 
         Assert.NotNull(signal);
         Assert.Equal(TradeDirection.Long, signal.Direction);
         Assert.Equal(131m, signal.EntryPrice);
+    }
+
+    [Fact]
+    public void Strategy_RejectsAbnormalBreakoutVolume()
+    {
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions
+        {
+            MaximumVolumeMultiplier = 3m,
+            RsiOverbought = 101m
+        }));
+        var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 400m).ToList();
+        var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
+        var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 2m, 100m, 258m, 100m);
+
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+        var openTime = fiveMinute[^1].CloseTime;
+        fiveMinute.Add(new Candle(openTime, openTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
+
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+    }
+
+    [Fact]
+    public void Strategy_RejectsWeakRetest()
+    {
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m }));
+        var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
+        var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
+        var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 2m, 100m, 258m, 100m);
+
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+        var openTime = fiveMinute[^1].CloseTime;
+        fiveMinute.Add(new Candle(openTime, openTime.AddMinutes(5), 131m, 132m, 110m, 131m, 100m, true));
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+        openTime = fiveMinute[^1].CloseTime;
+        fiveMinute.Add(new Candle(openTime, openTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
+
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+    }
+
+    [Fact]
+    public void Strategy_DoesNotArmExcludedSymbol()
+    {
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions
+        {
+            ExcludedSymbols = ["BTC-USDT"],
+            RsiOverbought = 101m
+        }));
+        var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
+        var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
+        var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 2m, 100m, 258m, 100m);
+
+        Assert.Null(strategy.Evaluate("btc-usdt", fiveMinute, fifteenMinute, oneHour));
+        var openTime = fiveMinute[^1].CloseTime;
+        fiveMinute.Add(new Candle(openTime, openTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
+
+        Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
     }
 
     [Fact]

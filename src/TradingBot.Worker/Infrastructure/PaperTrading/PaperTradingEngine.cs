@@ -58,6 +58,16 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
                 _balance, _realizedPnlToday);
         }
 
+        var performance = await tradeStore.LoadTradePerformanceAsync(cancellationToken);
+        if (performance is not null)
+        {
+            _totalWins = performance.Wins;
+            _totalLosses = performance.Losses;
+            _totalNetPnl = performance.TotalNetPnl;
+            logger.LogInformation("Paper performance reconciled from closed trades: wins={Wins}, losses={Losses}, totalNetPnl={TotalNetPnl}",
+                _totalWins, _totalLosses, _totalNetPnl);
+        }
+
         foreach (var position in await tradeStore.LoadOpenPositionsAsync(cancellationToken))
         {
             _positionsBySymbol[position.Symbol] = position;
@@ -72,7 +82,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
     {
         var symbol = update.Symbol;
         candleStore.Upsert(symbol, update.TimeFrame, update.Candle);
-        if (update.TimeFrame != TimeFrame.FifteenMinutes || !update.Candle.IsClosed) return;
+        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed) return;
         var lastProcessedCandle = _lastProcessedCandleBySymbol.GetValueOrDefault(symbol);
         if (lastProcessedCandle is not null && update.Candle.OpenTime <= lastProcessedCandle) return;
         _lastProcessedCandleBySymbol[symbol] = update.Candle.OpenTime;
@@ -86,16 +96,16 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         }
         if (update.IsReconciliation)
         {
-            logger.LogInformation("Skipping new entry on reconciled closed 15m candle for {Symbol} at {OpenTime}",
+            logger.LogInformation("Skipping new entry on reconciled closed 5m candle for {Symbol} at {OpenTime}",
                 symbol, update.Candle.OpenTime);
             return;
         }
 
-        var technicalSignal = strategy.Evaluate(symbol, candleStore.Get(symbol, TimeFrame.FifteenMinutes),
+        var technicalSignal = strategy.Evaluate(symbol, candleStore.Get(symbol, TimeFrame.FiveMinutes),
             candleStore.Get(symbol, TimeFrame.OneHour), candleStore.Get(symbol, TimeFrame.FourHours));
         var signalText = technicalSignal is null ? "none" : technicalSignal.Direction.ToString();
         logger.LogInformation(RuleNoSignalEvent,
-            "Evaluated closed 15m candle for {Symbol}: open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}, technicalSignal={TechnicalSignal}",
+            "Evaluated closed 5m candle for {Symbol}: open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}, technicalSignal={TechnicalSignal}",
             symbol, update.Candle.Open, update.Candle.High, update.Candle.Low, update.Candle.Close, update.Candle.Volume, signalText);
 
         if (technicalSignal is not null)
@@ -111,7 +121,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         if (openAiAnalyzer.Enabled)
         {
             var result = await openAiAnalyzer.AnalyzeAsync(new AiAnalysisContext(symbol, update.Candle.CloseTime,
-                candleStore.Get(symbol, TimeFrame.FifteenMinutes), candleStore.Get(symbol, TimeFrame.OneHour),
+                candleStore.Get(symbol, TimeFrame.FiveMinutes), candleStore.Get(symbol, TimeFrame.OneHour),
                 candleStore.Get(symbol, TimeFrame.FourHours), technicalSignal), cancellationToken);
             signal = BuildAiSignal(result, technicalSignal, update.Candle, symbol);
             if (signal is null) return;
@@ -144,7 +154,8 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         _balance -= plan.EntryFee;
         var entryFeatures = BuildEntryFeatures(symbol, signal with { EntryPrice = plan.EntryPrice });
         _positionsBySymbol[symbol] = new PaperPosition(plan.Symbol, plan.Direction, plan.Quantity, plan.EntryPrice, plan.StopLoss,
-            plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures, InitialStopLoss: plan.StopLoss);
+            plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures,
+            InitialStopLoss: plan.StopLoss, InitialQuantity: plan.Quantity);
         logger.LogWarning("========== PAPER OPEN {Direction} ========== {Quantity} {Symbol} @ {Entry}; SL={StopLoss}; TP={TakeProfit}; risk={Risk}; source={Source}; reason={Reason}",
             plan.Direction, plan.Quantity, plan.Symbol, plan.EntryPrice, plan.StopLoss, plan.TakeProfit, plan.RiskAmount, signal.Source, plan.Reason);
         await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
@@ -157,9 +168,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
 
     private TradeFeatures BuildEntryFeatures(string symbol, StrategySignal signal)
     {
-        // Note: TradeFeatures/DB column names still say 5m/15m/1h for historical reasons, but since the
-        // entry/medium/higher timeframes moved to 15m/1h/4h, these now carry that data instead.
-        var entryCandles = candleStore.Get(symbol, TimeFrame.FifteenMinutes);
+        var entryCandles = candleStore.Get(symbol, TimeFrame.FiveMinutes);
         var mediumTrendCandles = candleStore.Get(symbol, TimeFrame.OneHour);
         var higherTrendCandles = candleStore.Get(symbol, TimeFrame.FourHours);
         var lastCandle = entryCandles.Count > 0 ? entryCandles[^1] : null;
@@ -233,7 +242,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             return null;
         }
 
-        var atr = technicalSignal?.Atr ?? TechnicalIndicators.Atr(candleStore.Get(symbol, TimeFrame.FifteenMinutes), _strategyOptions.AtrPeriod);
+        var atr = technicalSignal?.Atr ?? TechnicalIndicators.Atr(candleStore.Get(symbol, TimeFrame.FiveMinutes), _strategyOptions.AtrPeriod);
         if (atr <= 0m)
         {
             logger.LogWarning("========== AI TRADE BLOCKED | ATR is unavailable ==========");
@@ -245,10 +254,11 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             decision.StopLoss, decision.TakeProfit, decision.Confidence, "openai");
     }
 
-    private async Task ApplyPartialTakeProfitAsync(string symbol, PaperPosition position, decimal partialPrice, CancellationToken cancellationToken)
+    private async Task<PaperPosition> ApplyPartialTakeProfitAsync(string symbol, PaperPosition position, decimal partialPrice,
+        CancellationToken cancellationToken)
     {
         var partialQuantity = position.Quantity * (_riskOptions.PartialTakeProfitPercent / 100m);
-        if (partialQuantity <= 0m) return;
+        if (partialQuantity <= 0m) return position;
 
         var directionMultiplier = position.Direction == TradeDirection.Long ? 1m : -1m;
         var slippageRate = _paperOptions.SlippageBasisPoints / 10_000m;
@@ -268,7 +278,8 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             Quantity = remainingQuantity,
             StopLoss = position.EntryPrice,
             RiskAmount = 0m,
-            PartialTaken = true
+            PartialTaken = true,
+            RealizedPartialPnl = position.RealizedPartialPnl + netPnl
         };
         _positionsBySymbol[symbol] = updatedPosition;
         logger.LogWarning(
@@ -277,11 +288,18 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
 
         await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
         await SaveAccountStateAsync(cancellationToken);
+        return updatedPosition;
     }
 
     private async Task<bool> TryClosePositionAsync(string symbol, PaperPosition position, Candle candle, CancellationToken cancellationToken)
     {
-        if (_riskOptions.UsePartialTakeProfit && !position.PartialTaken)
+        // Closed candles do not reveal whether SL or TP was touched first. Treat an SL touch as first
+        // so the simulation does not manufacture a partial profit from an ambiguous candle.
+        var initialStopHit = position.Direction == TradeDirection.Long
+            ? candle.Low <= position.StopLoss
+            : candle.High >= position.StopLoss;
+
+        if (!initialStopHit && _riskOptions.UsePartialTakeProfit && !position.PartialTaken)
         {
             var riskPerUnit = Math.Abs(position.EntryPrice - position.InitialStopLoss);
             if (riskPerUnit > 0m)
@@ -294,8 +312,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
                     : candle.Low <= partialTarget;
                 if (partialHit)
                 {
-                    await ApplyPartialTakeProfitAsync(symbol, position, partialTarget, cancellationToken);
-                    return false;
+                    position = await ApplyPartialTakeProfitAsync(symbol, position, partialTarget, cancellationToken);
                 }
             }
         }
@@ -327,13 +344,15 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         var exitFee = executionExitPrice * position.Quantity * _riskOptions.FeeRate;
         var fundingPeriods = Math.Max(0m, (decimal)Math.Floor((candle.CloseTime - position.OpenedAt).TotalHours / 8d));
         var fundingFee = position.EntryPrice * position.Quantity * _paperOptions.FundingRatePerEightHours * fundingPeriods * directionMultiplier;
-        var netPnl = grossPnl - position.EntryFee - exitFee - fundingFee;
+        var remainingNetPnl = grossPnl - position.EntryFee - exitFee - fundingFee;
+        var tradeNetPnl = position.RealizedPartialPnl + remainingNetPnl;
         _balance += grossPnl - exitFee - fundingFee;
-        _realizedPnlToday += netPnl;
-        if (netPnl >= 0m) _totalWins++; else _totalLosses++;
-        _totalNetPnl += netPnl;
-        logger.LogWarning("PAPER CLOSE {Reason} {Direction} {Quantity} {Symbol} @ {Exit}; funding={Funding}; netPnl={NetPnl}; balance={Balance}",
-            exitReason, position.Direction, position.Quantity, position.Symbol, executionExitPrice, fundingFee, netPnl, _balance);
+        _realizedPnlToday += remainingNetPnl;
+        if (tradeNetPnl >= 0m) _totalWins++; else _totalLosses++;
+        _totalNetPnl += remainingNetPnl;
+        logger.LogWarning("PAPER CLOSE {Reason} {Direction} {Quantity} {Symbol} @ {Exit}; funding={Funding}; remainingPnl={RemainingPnl}; tradeNetPnl={TradeNetPnl}; balance={Balance}",
+            exitReason, position.Direction, position.Quantity, position.Symbol, executionExitPrice, fundingFee,
+            remainingNetPnl, tradeNetPnl, _balance);
 
         var totalTrades = _totalWins + _totalLosses;
         var winRate = totalTrades == 0 ? 0m : (decimal)_totalWins / totalTrades;
@@ -342,8 +361,9 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         _positionsBySymbol[symbol] = null;
 
         await tradeStore.SaveOpenPositionsAsync(_positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray(), cancellationToken);
-        await tradeStore.RecordClosedTradeAsync(new ClosedTrade(position.Symbol, position.Direction, position.Quantity,
-            position.EntryPrice, executionExitPrice, position.StopLoss, position.TakeProfit, netPnl, exitReason,
+        await tradeStore.RecordClosedTradeAsync(new ClosedTrade(position.Symbol, position.Direction,
+            position.InitialQuantity == 0m ? position.Quantity : position.InitialQuantity,
+            position.EntryPrice, executionExitPrice, position.StopLoss, position.TakeProfit, tradeNetPnl, exitReason,
             "paper", position.OpenedAt, candle.CloseTime, position.EntryFeatures), cancellationToken);
         await SaveAccountStateAsync(cancellationToken);
         return true;

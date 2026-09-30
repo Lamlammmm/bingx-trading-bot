@@ -31,6 +31,22 @@ public interface ITradingStrategy
         IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles);
 }
 
+public interface ILiveExecutor
+{
+    Task<string> GetPositionHistoryAsync(string symbol, DateTimeOffset since, CancellationToken cancellationToken);
+    Task ValidatePositionModeAsync(CancellationToken cancellationToken);
+    Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken);
+    Task ValidateProtectionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken cancellationToken);
+    Task<decimal> GetAvailableBalanceUsdtAsync(CancellationToken cancellationToken);
+    Task<int> GetOpenPositionCountAsync(CancellationToken cancellationToken);
+    Task<bool> HasOpenPositionAsync(string symbol, CancellationToken cancellationToken);
+    Task SetLeverageAsync(string symbol, TradeDirection direction, decimal leverage, CancellationToken cancellationToken);
+    Task<decimal> GetMaxLeverageAsync(string symbol, TradeDirection direction, CancellationToken cancellationToken);
+    Task<LiveOrderReceipt> OpenMarketPositionAsync(string symbol, TradeDirection direction, decimal quantity,
+        decimal stopLoss, decimal takeProfit, string clientOrderId, CancellationToken cancellationToken);
+    Task<LiveOrderReceipt> CloseMarketPositionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken cancellationToken);
+}
+
 public interface IRiskManager
 {
     TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition,
@@ -47,8 +63,17 @@ public interface ITradeStore
 {
     Task InitializeAsync(CancellationToken cancellationToken);
     Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken);
+    Task<TradePerformance?> LoadTradePerformanceAsync(CancellationToken cancellationToken);
     Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken);
     Task<IReadOnlyList<PaperPosition>> LoadOpenPositionsAsync(CancellationToken cancellationToken);
     Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, CancellationToken cancellationToken);
     Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken);
+    IAsyncEnumerable<StoredPaperTrade> ReadClosedTradesAsync(CancellationToken cancellationToken);
+}
+
+public interface ILiveTradeJournal
+{
+    Task InitializeJournalAsync(CancellationToken cancellationToken);
+    Task RecordLiveEventAsync(LiveTradeEvent entry, CancellationToken cancellationToken);
+    IAsyncEnumerable<LiveTradeEvent> ReadLiveEventsAsync(CancellationToken cancellationToken);
 }

@@ -87,8 +87,8 @@ public sealed class OpenAiDecisionLoggingTests
 
     private static MarketUpdate CreateClosedUpdate()
     {
-        var openTime = DateTimeOffset.UtcNow.AddMinutes(-15);
-        return new MarketUpdate("BTC-USDT", TimeFrame.FifteenMinutes,
+        var openTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        return new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
             new Candle(openTime, openTime.AddMinutes(5), 99m, 101m, 98m, 100m, 10m, true));
     }
 
@@ -112,6 +112,10 @@ public sealed class OpenAiDecisionLoggingTests
     {
         public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken) => Task.FromResult<AccountState?>(null);
+        public Task<TradePerformance?> LoadTradePerformanceAsync(CancellationToken cancellationToken) => Task.FromResult<TradePerformance?>(null);
+        public async IAsyncEnumerable<StoredPaperTrade> ReadClosedTradesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        { await Task.CompletedTask; yield break; }
         public Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task<IReadOnlyList<PaperPosition>> LoadOpenPositionsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PaperPosition>>(Array.Empty<PaperPosition>());
         public Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, CancellationToken cancellationToken) => Task.CompletedTask;

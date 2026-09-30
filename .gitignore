@@ -7,3 +7,5 @@ outputs/
 work/
 src/TradingBot.Worker/data/
 /data/
+artifacts/
+src/TradingBot.Worker/exports/

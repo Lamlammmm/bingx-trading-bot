@@ -1,6 +1,6 @@
 # BingX Trading Bot - Phase 1
 
-Bot .NET Worker cho BingX USDT-M Perpetual Futures. Giai đoạn này có thể dùng OpenAI để phân tích quyết định, nhưng chỉ paper trade; không có code đặt, sửa, hủy lệnh thật.
+Bot .NET Worker cho BingX USDT-M Perpetual Futures, gồm paper trading và live trading. `Live:Enabled=true` cho phép đặt lệnh thật. Xem [hướng dẫn chạy live](LIVE_RUNBOOK.md) trước khi khởi động.
 
 ## Phạm vi giai đoạn 1
 
@@ -12,7 +12,7 @@ Bot .NET Worker cho BingX USDT-M Perpetual Futures. Giai đoạn này có thể 
 - Persistence: lưu account state, thống kê và vị thế đang mở để khôi phục sau restart.
 - OpenAI tùy chọn: trả về `long`, `short` hoặc `no_trade` bằng Structured Outputs; Risk Gate luôn kiểm tra lại SL/TP, confidence, entry deviation, daily loss và leverage.
 - Khi OpenAI bật nhưng API key thiếu, lỗi hoặc response sai schema, bot fail-closed về `no_trade`.
-- BingX API key/secret chưa được sử dụng vì Phase 1 chỉ dùng public market data và chưa có live executor.
+- BingX API key/secret được dùng cho nhánh live; không dùng trong prompt OpenAI.
 
 ## Endpoint BingX đang dùng
 
@@ -57,7 +57,7 @@ Mở file `src/TradingBot.Worker/appsettings.Development.json` và điền:
 }
 ```
 
-File này đã được `.gitignore`, không đưa lên GitHub. API key/secret BingX hiện chỉ được lưu cho bước tích hợp tài khoản về sau; Phase 1 vẫn chỉ dùng market data công khai và paper trading.
+File này đã được `.gitignore`, không đưa lên GitHub. Nhánh live sử dụng key/secret BingX; biến môi trường `BINGX_API_KEY` và `BINGX_API_SECRET` được ưu tiên.
 
 ### Bật OpenAI phân tích paper trading
 
@@ -126,4 +126,4 @@ src/TradingBot.Worker
 
 Paper engine vào lệnh tại giá đóng cửa của nến tín hiệu, cộng slippage bất lợi theo cấu hình. Nếu cùng một nến chạm cả SL và TP, engine xử lý SL trước để mô phỏng thận trọng. Vị thế, account state và thống kê được lưu trong SQLite/Postgres; dữ liệu market candle và backtest/dashboard chưa có.
 
-Live trading chưa được đăng ký vào DI và không có executor gọi endpoint order. Khi chuyển giai đoạn, cần thêm adapter riêng dùng `BINGX_API_KEY` và `BINGX_API_SECRET` từ environment variables, test trên demo/sandbox, bổ sung idempotency, position reconciliation, kill switch và kiểm tra quyền API không bao gồm rút tiền. OpenAI chỉ tạo quyết định có cấu trúc; tuyệt đối không đưa BingX secret vào prompt hoặc cho model tự giữ credential.
+Live trading đã được đăng ký vào DI, sử dụng chiến lược kỹ thuật riêng, không dùng quyết định AI của paper engine. Lệnh mở kèm SL/TP trên sàn; trạng thái live lưu riêng trong `data/live-state.json`. Bot đối chiếu vị thế sau restart và chặn giao dịch khi kết quả lệnh chưa rõ. Xem các giới hạn vận hành trong [LIVE_RUNBOOK.md](LIVE_RUNBOOK.md). Không đưa BingX secret vào prompt.
