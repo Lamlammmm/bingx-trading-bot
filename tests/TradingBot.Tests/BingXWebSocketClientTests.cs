@@ -5,6 +5,29 @@ namespace TradingBot.Tests;
 
 public sealed class BingXWebSocketClientTests
 {
+    [Theory]
+    [InlineData("15m", TimeFrame.FifteenMinutes, 15)]
+    [InlineData("30m", TimeFrame.ThirtyMinutes, 30)]
+    [InlineData("1h", TimeFrame.OneHour, 60)]
+    public void NativeTrendAndEntryBarsCloseAtTheirOwnInterval(string interval, TimeFrame frame, int minutes)
+    {
+        var payload = $$"""
+            {"dataType":"BTC-USDT@kline_{{interval}}","data":[{"T":1787750100000,"o":"100","h":"110","l":"90","c":"105","v":"12"}]}
+            """;
+        var update = Assert.Single(BingXWebSocketClient.ParseUpdates(payload));
+        Assert.Equal(frame, update.TimeFrame);
+        Assert.Equal(update.Candle.OpenTime.AddMinutes(minutes), update.Candle.CloseTime);
+
+        var tracker = new ClosedCandleTracker();
+        Assert.Null(tracker.Observe(update));
+        var next = update with { Candle = update.Candle with {
+            OpenTime = update.Candle.OpenTime.AddMinutes(minutes), CloseTime = update.Candle.CloseTime.AddMinutes(minutes) } };
+        var closed = Assert.IsType<MarketUpdate>(tracker.Observe(next));
+        Assert.True(closed.Candle.IsClosed);
+        Assert.Equal(update.Candle.OpenTime, closed.Candle.OpenTime);
+        Assert.Null(tracker.Observe(next));
+    }
+
     [Fact]
     public void ParseUpdates_ParsesLiveFlatArrayPayload()
     {

@@ -62,12 +62,14 @@ public sealed class BingXLiveExecutor(HttpClient httpClient, IOptions<BingXOptio
             throw new InvalidOperationException("Live trading requires Hedge position mode. Change it in BingX before starting.");
     }
 
-    public async Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken)
+    public async Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken, string? symbol = null)
     {
-        using var document = await SendAsync(HttpMethod.Get, "/openApi/swap/v2/trade/openOrders", new(), cancellationToken);
+        using var document = await SendAsync(HttpMethod.Get, "/openApi/swap/v2/trade/openOrders",
+            symbol is null ? new() : new() { ["symbol"] = symbol }, cancellationToken);
         var data = document.RootElement.GetProperty("data");
         var orders = data.ValueKind == JsonValueKind.Array ? data : data.GetProperty("orders");
-        return orders.GetArrayLength();
+        return symbol is null ? orders.GetArrayLength() : orders.EnumerateArray()
+            .Count(order => string.Equals(order.GetProperty("symbol").GetString(), symbol, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task ValidateProtectionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken cancellationToken)

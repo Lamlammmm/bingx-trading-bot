@@ -134,6 +134,20 @@ public sealed class BingXLiveExecutorTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => executor.GetAvailableBalanceUsdtAsync(CancellationToken.None));
     }
 
+    [Fact]
+    public async Task OpenOrderQueryIsScopedToEntrySymbol()
+    {
+        var handler = new ResponseHandler("{\"orders\":[{\"symbol\":\"SOL-USDT\"},{\"symbol\":\"BTC-USDT\"}]}");
+        using var client = new HttpClient(handler) { BaseAddress = new Uri("https://example.test") };
+        var executor = new BingXLiveExecutor(client,
+            Options.Create(new BingXOptions { ApiKey = "test", ApiSecret = "test" }),
+            NullLogger<BingXLiveExecutor>.Instance);
+        Assert.Equal(1, await executor.GetOpenOrderCountAsync(default, "SOL-USDT"));
+        Assert.Contains("symbol=SOL-USDT", handler.LastUri!.Query);
+        Assert.Equal(2, await executor.GetOpenOrderCountAsync(default));
+        Assert.DoesNotContain("symbol=", handler.LastUri!.Query);
+    }
+
     private sealed class ResponseHandler(string data) : HttpMessageHandler
     {
         public Uri? LastUri { get; private set; }

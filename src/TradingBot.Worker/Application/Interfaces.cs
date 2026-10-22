@@ -35,7 +35,7 @@ public interface ILiveExecutor
 {
     Task<string> GetPositionHistoryAsync(string symbol, DateTimeOffset since, CancellationToken cancellationToken);
     Task ValidatePositionModeAsync(CancellationToken cancellationToken);
-    Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken);
+    Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken, string? symbol = null);
     Task ValidateProtectionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken cancellationToken);
     Task<decimal> GetAvailableBalanceUsdtAsync(CancellationToken cancellationToken);
     Task<int> GetOpenPositionCountAsync(CancellationToken cancellationToken);

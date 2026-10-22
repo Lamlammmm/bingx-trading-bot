@@ -1,6 +1,7 @@
 namespace TradingBot.Worker.Domain;
 
-public enum TimeFrame { OneMinute, FiveMinutes, FifteenMinutes, OneHour, FourHours }
+// Append new values so persisted enum numbers retain their original meaning.
+public enum TimeFrame { OneMinute, FiveMinutes, FifteenMinutes, OneHour, FourHours, ThirtyMinutes }
 public enum TradeDirection { Long, Short }
 
 public sealed record Candle(

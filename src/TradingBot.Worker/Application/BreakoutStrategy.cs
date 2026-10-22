@@ -16,6 +16,12 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
         IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles)
     {
         if (_options.ExcludedSymbols.Contains(symbol, StringComparer.OrdinalIgnoreCase)) return null;
+        // Higher-timeframe snapshots may include a forming candle or future context during replay.
+        entryCandles = entryCandles.Where(c => c.IsClosed).ToArray();
+        if (entryCandles.Count == 0) return null;
+        var signalTime = entryCandles[^1].CloseTime;
+        mediumTrendCandles = mediumTrendCandles.Where(c => c.IsClosed && c.CloseTime <= signalTime).ToArray();
+        higherTrendCandles = higherTrendCandles.Where(c => c.IsClosed && c.CloseTime <= signalTime).ToArray();
 
         var minimumCandles = Math.Max(_options.SlowEmaPeriod, Math.Max(_options.BreakoutLookback, _options.VolumeLookback)) + 1;
         if (entryCandles.Count < minimumCandles || mediumTrendCandles.Count < _options.SlowEmaPeriod || higherTrendCandles.Count < _options.SlowEmaPeriod)
@@ -34,6 +40,7 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
             }
             else
             {
+                if (current.OpenTime <= pending.DetectedAt) return null;
                 var confirmed = pending.Direction == TradeDirection.Long
                     ? current.Low <= pending.Level && current.Close > pending.Level
                     : current.High >= pending.Level && current.Close < pending.Level;
@@ -51,8 +58,10 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
                         retestBodyRatio >= _options.MinimumBodyRatio &&
                         current.Volume < retestAverageVolume * _options.MaximumVolumeMultiplier &&
                         (pending.Direction == TradeDirection.Long
-                            ? retestRsi < _options.RsiOverbought
-                            : retestRsi > _options.RsiOversold);
+                            ? current.Close > current.Open && retestRsi < _options.RsiOverbought &&
+                                IsBullishTrend(mediumTrendCandles) && IsBullishTrend(higherTrendCandles)
+                            : current.Close < current.Open && retestRsi > _options.RsiOversold &&
+                                IsBearishTrend(mediumTrendCandles) && IsBearishTrend(higherTrendCandles));
                     if (!retestQualityIsValid)
                     {
                         _pendingBySymbol.Remove(symbol);
@@ -65,7 +74,7 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
 
                     _lastSignalTimeBySymbol[symbol] = current.OpenTime;
                     return new StrategySignal(symbol, pending.Direction, current.CloseTime, current.Close, atr,
-                        $"{pending.Reason}; level retested and held");
+                        $"{pending.Reason}; level retested and held; closed medium/higher trends and candle direction reconfirmed");
                 }
 
                 if (failed)
@@ -95,7 +104,7 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
             && rsi < _options.RsiOverbought)
         {
             _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Long, recentHigh, current.OpenTime,
-                $"4H/1H bullish; entry-TF close broke {recentHigh:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
+                $"Medium/higher trends bullish; entry-TF close broke {recentHigh:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
             return null;
         }
 
@@ -103,7 +112,7 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
             && rsi > _options.RsiOversold)
         {
             _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Short, recentLow, current.OpenTime,
-                $"4H/1H bearish; entry-TF close broke {recentLow:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
+                $"Medium/higher trends bearish; entry-TF close broke {recentLow:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
             return null;
         }
 

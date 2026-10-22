@@ -7,8 +7,10 @@ namespace TradingBot.Tests;
 
 public sealed class TradingLogicTests
 {
-    [Fact]
-    public void Strategy_ReturnsLongSignalForConfirmedBreakout()
+    [Theory]
+    [InlineData(TradeDirection.Long)]
+    [InlineData(TradeDirection.Short)]
+    public void Strategy_ReturnsDirectionalSignalForConfirmedBreakout(TradeDirection direction)
     {
         var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions
         {
@@ -18,26 +20,39 @@ public sealed class TradingLogicTests
             VolumeLookback = 20,
             VolumeMultiplier = 1.2m,
             AtrPeriod = 14,
-            RsiOverbought = 101m
+            RsiOverbought = 101m, RsiOversold = -1m
         }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
         var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 2m, 100m, 258m, 100m);
 
+        if (direction == TradeDirection.Short)
+        {
+            fiveMinute = fiveMinute.Select(c => c with { Open = 300m - c.Open, High = 300m - c.Low,
+                Low = 300m - c.High, Close = 300m - c.Close }).ToList();
+            fifteenMinute = fifteenMinute.Select(c => c with { Open = 300m - c.Open, High = 300m - c.Low,
+                Low = 300m - c.High, Close = 300m - c.Close }).ToArray();
+            oneHour = oneHour.Select(c => c with { Open = 300m - c.Open, High = 300m - c.Low,
+                Low = 300m - c.High, Close = 300m - c.Close }).ToArray();
+        }
         var breakoutSignal = strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour);
         Assert.Null(breakoutSignal); // breakout candle only arms a pending signal, awaiting retest confirmation
 
         var lastOpenTime = fiveMinute[^1].CloseTime;
-        fiveMinute.Add(new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 130m, 132m, 129m, 131m, 100m, true));
+        fiveMinute.Add(direction == TradeDirection.Long
+            ? new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 130m, 132m, 129m, 131m, 100m, true)
+            : new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 170m, 171m, 168m, 169m, 100m, true));
         Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
 
         lastOpenTime = fiveMinute[^1].CloseTime;
-        fiveMinute.Add(new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
+        fiveMinute.Add(direction == TradeDirection.Long
+            ? new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true)
+            : new Candle(lastOpenTime, lastOpenTime.AddMinutes(5), 188m, 190m, 168m, 169m, 100m, true));
         var signal = strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour);
 
         Assert.NotNull(signal);
-        Assert.Equal(TradeDirection.Long, signal.Direction);
-        Assert.Equal(131m, signal.EntryPrice);
+        Assert.Equal(direction, signal.Direction);
+        Assert.Equal(direction == TradeDirection.Long ? 131m : 169m, signal.EntryPrice);
     }
 
     [Fact]
@@ -94,6 +109,40 @@ public sealed class TradingLogicTests
         fiveMinute.Add(new Candle(openTime, openTime.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
 
         Assert.Null(strategy.Evaluate("BTC-USDT", fiveMinute, fifteenMinute, oneHour));
+    }
+
+    [Theory]
+    [InlineData("trend-flipped")]
+    [InlineData("bearish-retest")]
+    [InlineData("forming-trend")]
+    [InlineData("future-trend")]
+    [InlineData("same-breakout-candle")]
+    public void Strategy_RejectsRetestWithoutConfirmedDirectionalContext(string scenario)
+    {
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m }));
+        var entry = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
+        var medium = BuildCandles(80, TimeSpan.FromHours(1), 100m, 1m, 100m, 179m, 100m).ToList();
+        var higher = BuildCandles(80, TimeSpan.FromHours(4), 100m, 2m, 100m, 258m, 100m).ToList();
+        Assert.Null(strategy.Evaluate("SOL-USDT", entry, medium, higher));
+        if (scenario == "same-breakout-candle")
+        {
+            Assert.Null(strategy.Evaluate("SOL-USDT", entry, medium, higher));
+            return;
+        }
+        var time = entry[^1].CloseTime;
+        entry.Add(scenario == "bearish-retest"
+            ? new Candle(time, time.AddMinutes(5), 145m, 146m, 110m, 125m, 100m, true)
+            : new Candle(time, time.AddMinutes(5), 112m, 132m, 110m, 131m, 100m, true));
+        if (scenario == "trend-flipped")
+            medium.Add(new Candle(time, time.AddMinutes(5), 179m, 180m, 49m, 50m, 100m, true));
+        if (scenario is "forming-trend" or "future-trend")
+        {
+            // Only 49 usable closed trend candles: future/forming rows cannot provide the missing history.
+            medium = medium.TakeLast(49).ToList();
+            medium.Add(new Candle(time, scenario == "future-trend" ? time.AddHours(1) : time.AddMinutes(5),
+                179m, 181m, 178m, 180m, 100m, scenario != "forming-trend"));
+        }
+        Assert.Null(strategy.Evaluate("SOL-USDT", entry, medium, higher));
     }
 
     [Fact]

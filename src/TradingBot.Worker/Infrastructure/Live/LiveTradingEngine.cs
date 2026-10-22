@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
@@ -22,7 +23,6 @@ public sealed class LiveTradingEngine : IDisposable
     private LiveState _state = new();
     private FileStream? _stateLock;
     private bool _initialized;
-    private bool _externalPositionDetected;
 
     public sealed record SavedPosition(string Symbol, TradeDirection Direction, decimal Quantity,
         decimal StopLoss, decimal TakeProfit, DateTimeOffset OpenedAt, string? TradeId = null,
@@ -30,9 +30,12 @@ public sealed class LiveTradingEngine : IDisposable
 
     public sealed class LiveState
     {
-        public int Version { get; set; } = 1;
+        public int Version { get; set; } = 2;
         public string? PendingOrder { get; set; }
+        // Read legacy single-position snapshots, then persist only Positions in version 2.
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public SavedPosition? Position { get; set; }
+        public List<SavedPosition> Positions { get; set; } = new();
         public List<LiveTradeEvent> JournalOutbox { get; set; } = new();
     }
 
@@ -57,9 +60,11 @@ public sealed class LiveTradingEngine : IDisposable
         if (_riskOptions.RiskPerTradePercent <= 0m || _riskOptions.RiskPerTradePercent >= 100m ||
             _options.Leverage < 1m || _options.Leverage != decimal.Truncate(_options.Leverage) ||
             _options.MaxLeverage < 1m || _options.MaxLeverage != decimal.Truncate(_options.MaxLeverage) ||
-            _options.MaxOpenPositions != 1 ||
-            _options.StopAtrMultiplier <= 0m || _options.TakeProfitRiskMultiple <= 0m || _options.MaxHoldingMinutes < 0)
-            throw new InvalidOperationException("Invalid Live options: requires one position, positive integer leverage, and percentages between 0 and 100.");
+            _options.MaxOpenPositions < 0 ||
+            _options.MaxMarginUsagePercent <= 0m || _options.MaxMarginUsagePercent > 100m ||
+            _riskOptions.FeeRate < 0m ||
+            _options.StopAtrMultiplier <= 0m || _options.TakeProfitRiskMultiple <= 0m)
+            throw new InvalidOperationException("Invalid Live options: requires a nonnegative position limit, positive integer leverage, and valid risk/margin percentages.");
 
         var path = Path.GetFullPath(_options.StatePath);
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
@@ -67,8 +72,20 @@ public sealed class LiveTradingEngine : IDisposable
         if (File.Exists(path))
             _state = JsonSerializer.Deserialize<LiveState>(await File.ReadAllTextAsync(path, cancellationToken))
                 ?? throw new InvalidOperationException("Live state is empty.");
-        if (_state.Version != 1)
+        if (_state.Version is not (1 or 2) || _state.Positions is null ||
+            (_state.Version == 2 && _state.Position is not null))
             throw new InvalidOperationException("Live state is invalid.");
+        if (_state.Version == 1 && _state.Position is { } legacy)
+        {
+            if (_state.Positions.Count != 0)
+                throw new InvalidOperationException("Live state contains conflicting legacy and multi-position data.");
+            _state.Positions.Add(legacy);
+        }
+        if (_state.Positions.Any(p => string.IsNullOrWhiteSpace(p.Symbol) || p.Quantity <= 0m) ||
+            _state.Positions.Select(p => p.Symbol).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _state.Positions.Count)
+            throw new InvalidOperationException("Live state contains invalid or duplicate positions.");
+        _state.Version = 2;
+        _state.Position = null;
         await _journal.InitializeJournalAsync(cancellationToken);
         await SaveAsync(cancellationToken);
         if (_state.PendingOrder is not null)
@@ -77,61 +94,42 @@ public sealed class LiveTradingEngine : IDisposable
         await _executor.ValidatePositionModeAsync(cancellationToken);
         await ReconcileAsync(cancellationToken);
         _initialized = true;
-        _logger.LogWarning("LIVE READY | riskPerTrade={RiskPerTrade}% | leverage={Leverage} | autoLeverage={AutoLeverage} | maxLeverage={MaxLeverage} | restoredPosition={Symbol} | state={Path}",
-            _riskOptions.RiskPerTradePercent, _options.Leverage, _options.AutoLeverage, _options.MaxLeverage, _state.Position?.Symbol, path);
+        _logger.LogWarning("LIVE READY | entry=15m | trends=30m/1h | exits=SL/TP only | riskPerTrade={RiskPerTrade}% | leverage={Leverage} | autoLeverage={AutoLeverage} | maxLeverage={MaxLeverage} | restoredPositions={PositionCount} | positionLimit={PositionLimit} | state={Path}",
+            _riskOptions.RiskPerTradePercent, _options.Leverage, _options.AutoLeverage, _options.MaxLeverage, _state.Positions.Count, _options.MaxOpenPositions, path);
     }
 
-    private async Task<bool> ReconcileAsync(CancellationToken cancellationToken)
+    private async Task ReconcileAsync(CancellationToken cancellationToken, string? symbol = null)
     {
-        var count = await _executor.GetOpenPositionCountAsync(cancellationToken);
-        if (count > 0)
+        foreach (var position in _state.Positions.ToArray())
         {
-            if (count != 1 || _state.Position is not { } position)
+            if (symbol is not null && !string.Equals(position.Symbol, symbol, StringComparison.OrdinalIgnoreCase)) continue;
+            if (await _executor.HasOpenPositionAsync(position.Symbol, cancellationToken))
             {
-                if (!_externalPositionDetected)
-                    _logger.LogWarning("LIVE PAUSED | detected {PositionCount} exchange position(s) not fully tracked by the bot; manual positions are left untouched and new bot entries are blocked",
-                        count);
-                _externalPositionDetected = true;
-                return true;
+                await _executor.ValidateProtectionAsync(position.Symbol, position.Direction, position.Quantity, cancellationToken);
+                continue;
             }
-            await _executor.ValidateProtectionAsync(position.Symbol, position.Direction, position.Quantity, cancellationToken);
-            _externalPositionDetected = false;
-            return false;
-        }
 
-        if (_externalPositionDetected)
-        {
-            _externalPositionDetected = false;
-            _logger.LogWarning("LIVE RESUMED | no external exchange positions remain");
-        }
-
-        if (_state.Position is { } closed)
-        {
-            var tradeId = closed.TradeId ?? $"legacy-{closed.Symbol}-{closed.OpenedAt.ToUnixTimeMilliseconds()}";
-            _state.JournalOutbox.Add(new LiveTradeEvent(tradeId + ":closed", tradeId, closed.Symbol,
+            var tradeId = position.TradeId ?? $"legacy-{position.Symbol}-{position.OpenedAt.ToUnixTimeMilliseconds()}";
+            _state.JournalOutbox.Add(new LiveTradeEvent(tradeId + ":closed", tradeId, position.Symbol,
                 "closed_observed", DateTimeOffset.UtcNow, JsonSerializer.Serialize(new
                 {
-                    Position = closed, Observation = "Exchange reports no open positions; this timestamp is detection time, not fill time.",
-                    RequestedExit = closed.RequestedExitReason ?? "EXCHANGE",
+                    Position = position, Observation = "Exchange reports no open position for the tracked symbol; this timestamp is detection time, not fill time.",
+                    RequestedExit = position.RequestedExitReason ?? "EXCHANGE",
                     ActualExitReason = (string?)null, NetPnl = (decimal?)null
                 })));
             await SaveAsync(cancellationToken);
-            var history = await _executor.GetPositionHistoryAsync(closed.Symbol, closed.OpenedAt.AddMinutes(-1), cancellationToken);
-            _state.JournalOutbox.Add(new LiveTradeEvent(tradeId + ":history", tradeId, closed.Symbol,
+            var history = await _executor.GetPositionHistoryAsync(position.Symbol, position.OpenedAt.AddMinutes(-1), cancellationToken);
+            _state.JournalOutbox.Add(new LiveTradeEvent(tradeId + ":history", tradeId, position.Symbol,
                 "exchange_position_history", DateTimeOffset.UtcNow, history));
             await SaveAsync(cancellationToken);
-        }
-        // Never cancel unknown orders or let old protective orders affect a new position.
-        if (await _executor.GetOpenOrderCountAsync(cancellationToken) != 0)
-            throw new InvalidOperationException("Outstanding exchange orders while flat: inspect them in BingX before new entries.");
-        if (_state.Position is not null)
-        {
+            // Keep tracking until old protective orders are gone; never cancel unknown orders.
+            if (await _executor.GetOpenOrderCountAsync(cancellationToken, position.Symbol) != 0)
+                throw new InvalidOperationException($"Outstanding exchange orders for closed bot position {position.Symbol}; inspect them in BingX before new entries.");
             var balance = await _executor.GetAvailableBalanceUsdtAsync(cancellationToken);
-            _logger.LogWarning("LIVE position closed on exchange | symbol={Symbol} | availableUSDT={Balance}", _state.Position.Symbol, balance);
+            _logger.LogWarning("LIVE position closed on exchange | symbol={Symbol} | availableUSDT={Balance}", position.Symbol, balance);
+            _state.Positions.Remove(position);
+            await SaveAsync(cancellationToken);
         }
-        _state.Position = null;
-        await SaveAsync(cancellationToken);
-        return false;
     }
 
     public async Task ProcessAsync(MarketUpdate update, CancellationToken cancellationToken)
@@ -139,39 +137,22 @@ public sealed class LiveTradingEngine : IDisposable
         if (!_options.Enabled) return;
         if (!_initialized) throw new InvalidOperationException("Live initialization has not completed.");
         if (_state.PendingOrder is not null) return;
-        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed || update.IsReconciliation) return;
+        if (update.TimeFrame != TimeFrame.FifteenMinutes || !update.Candle.IsClosed || update.IsReconciliation) return;
         if (DateTimeOffset.UtcNow - update.Candle.CloseTime > TimeSpan.FromMinutes(2)) return;
         if (update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10)) return;
         if (_lastProcessed.TryGetValue(update.Symbol, out var last) && update.Candle.OpenTime <= last) return;
         _lastProcessed[update.Symbol] = update.Candle.OpenTime;
 
-        if (await ReconcileAsync(cancellationToken)) return;
-        if (_state.Position is { } held)
-        {
-            if (held.Symbol != update.Symbol || _options.MaxHoldingMinutes == 0 ||
-                DateTimeOffset.UtcNow < held.OpenedAt.AddMinutes(_options.MaxHoldingMinutes)) return;
-            _state.PendingOrder = "close-" + Guid.NewGuid().ToString("N");
-            _state.Position = held with { RequestedExitReason = "TIME_EXIT" };
-            var tradeId = held.TradeId ?? $"legacy-{held.Symbol}-{held.OpenedAt.ToUnixTimeMilliseconds()}";
-            _state.JournalOutbox.Add(new LiveTradeEvent(_state.PendingOrder, tradeId, held.Symbol,
-                "close_requested", DateTimeOffset.UtcNow, JsonSerializer.Serialize(new { Position = held, Reason = "TIME_EXIT" })));
-            await SaveAsync(cancellationToken);
-            var closePrice = await _executor.CloseMarketPositionAsync(held.Symbol, held.Direction, held.Quantity, cancellationToken);
-            _state.JournalOutbox.Add(new LiveTradeEvent(_state.PendingOrder + ":response", tradeId, held.Symbol,
-                "close_response", DateTimeOffset.UtcNow, JsonSerializer.Serialize(closePrice)));
-            await SaveAsync(cancellationToken);
-            if (await _executor.HasOpenPositionAsync(held.Symbol, cancellationToken))
-                throw new InvalidOperationException("Close not confirmed; check live position in BingX.");
-            _state.PendingOrder = null;
-            await SaveAsync(cancellationToken);
-            await ReconcileAsync(cancellationToken);
-            return;
-        }
-        var signal = _strategy.Evaluate(update.Symbol, _candles.Get(update.Symbol, TimeFrame.FiveMinutes),
-            _candles.Get(update.Symbol, TimeFrame.OneHour), _candles.Get(update.Symbol, TimeFrame.FourHours));
+        await ReconcileAsync(cancellationToken, update.Symbol);
+        if (_state.Positions.Any(p => string.Equals(p.Symbol, update.Symbol, StringComparison.OrdinalIgnoreCase))) return;
+        if (_options.MaxOpenPositions > 0 && _state.Positions.Count >= _options.MaxOpenPositions) return;
+        var signal = _strategy.Evaluate(update.Symbol, _candles.Get(update.Symbol, TimeFrame.FifteenMinutes),
+            _candles.Get(update.Symbol, TimeFrame.ThirtyMinutes), _candles.Get(update.Symbol, TimeFrame.OneHour));
         if (signal is null) return;
         var contract = _contracts.Get(update.Symbol);
         if (contract is null || !contract.IsActive || signal.EntryPrice <= 0m || signal.Atr <= 0m) return;
+        if (await _executor.HasOpenPositionAsync(update.Symbol, cancellationToken) ||
+            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0) return;
         var balance = await _executor.GetAvailableBalanceUsdtAsync(cancellationToken);
         if (balance <= 0m) return;
         if (contract.QuantityPrecision < 0m || contract.QuantityPrecision > 28m ||
@@ -183,21 +164,27 @@ public sealed class LiveTradingEngine : IDisposable
         var take = Math.Round(signal.EntryPrice + sign * distance * _options.TakeProfitRiskMultiple, (int)contract.PricePrecision);
         distance = Math.Abs(signal.EntryPrice - stop);
         if (stop <= 0m || take <= 0m || distance <= 0m || sign * (take - signal.EntryPrice) <= 0m) return;
+        var estimatedCostsPerUnit = (signal.EntryPrice + take) * _riskOptions.FeeRate;
+        if (Math.Abs(take - signal.EntryPrice) <= estimatedCostsPerUnit) return;
 
+        var marginBudget = balance * _options.MaxMarginUsagePercent / 100m;
         var riskBudget = balance * _riskOptions.RiskPerTradePercent / 100m;
         var riskQuantity = riskBudget / distance;
         var leverage = _options.AutoLeverage
-            ? Math.Max(1m, decimal.Ceiling(riskQuantity * signal.EntryPrice / balance))
+            ? Math.Max(1m, decimal.Ceiling(riskQuantity * signal.EntryPrice / marginBudget))
             : _options.Leverage;
         var exchangeMaximum = await _executor.GetMaxLeverageAsync(update.Symbol, signal.Direction, cancellationToken);
         var maximum = Math.Min(_options.MaxLeverage, exchangeMaximum);
-        if (leverage > maximum)
+        if (_options.AutoLeverage)
+            leverage = Math.Min(leverage, maximum);
+        else if (leverage > maximum)
         {
-            _logger.LogWarning("LIVE SKIPPED {Symbol} | requiredLeverage={Required} exceeds maxLeverage={Maximum} | availableUSDT={Balance}",
-                update.Symbol, leverage, maximum, balance);
+            _logger.LogWarning("LIVE SKIPPED {Symbol} | configuredLeverage={Required} exceeds maxLeverage={Maximum}",
+                update.Symbol, leverage, maximum);
             return;
         }
-        var maximumQuantityForMargin = balance * leverage / signal.EntryPrice;
+        // Reserve estimated entry/exit fees in the margin allocation.
+        var maximumQuantityForMargin = marginBudget / (signal.EntryPrice / leverage + signal.EntryPrice * _riskOptions.FeeRate * 2m);
         var quantity = Math.Round(Math.Min(riskQuantity, maximumQuantityForMargin),
             (int)contract.QuantityPrecision, MidpointRounding.ToZero);
         if (quantity <= 0m || quantity < contract.MinimumQuantity || quantity * signal.EntryPrice < contract.MinimumOrderValue)
@@ -207,35 +194,37 @@ public sealed class LiveTradingEngine : IDisposable
             return;
         }
         await _executor.ValidatePositionModeAsync(cancellationToken);
-        _logger.LogInformation("LIVE SIZING {Symbol} | riskBudget={RiskBudget} | stopDistance={StopDistance} | leverage={Leverage} | quantity={Quantity} | notional={Notional}",
-            update.Symbol, riskBudget, distance, leverage, quantity, quantity * signal.EntryPrice);
+        _logger.LogInformation("LIVE SIZING {Symbol} | riskBudget={RiskBudget} | stopDistance={StopDistance} | leverage={Leverage} | quantity={Quantity} | notional={Notional} | availableUSDT={Balance} | marginBudget={MarginBudget} | botPositions={PositionCount}",
+            update.Symbol, riskBudget, distance, leverage, quantity, quantity * signal.EntryPrice, balance, marginBudget, _state.Positions.Count);
+        if (await _executor.HasOpenPositionAsync(update.Symbol, cancellationToken) ||
+            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0) return;
         await _executor.SetLeverageAsync(update.Symbol, signal.Direction, leverage, cancellationToken);
-        if (await _executor.GetOpenPositionCountAsync(cancellationToken) != 0 ||
-            await _executor.GetOpenOrderCountAsync(cancellationToken) != 0) return;
         _state.PendingOrder = "bot-" + Guid.NewGuid().ToString("N");
         var entryId = _state.PendingOrder;
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":requested", entryId, update.Symbol,
             "entry_requested", DateTimeOffset.UtcNow, JsonSerializer.Serialize(new
             {
-                SchemaVersion = 1, Signal = signal, Quantity = quantity, Leverage = leverage,
-                AvailableBalance = balance, RiskBudget = riskBudget, StopDistance = distance,
+                SchemaVersion = 2, EntryTimeFrame = "15m", MediumTrendTimeFrame = "30m", HigherTrendTimeFrame = "1h",
+                Signal = signal, Quantity = quantity, Leverage = leverage,
+                AvailableBalance = balance, MarginBudget = marginBudget, EstimatedCostsPerUnit = estimatedCostsPerUnit, RiskBudget = riskBudget, StopDistance = distance,
                 StopLoss = stop, TakeProfit = take,
                 Contract = contract, Strategy = _strategyOptions, Live = _options,
-                EntryCandles = _candles.Get(update.Symbol, TimeFrame.FiveMinutes),
-                HourCandles = _candles.Get(update.Symbol, TimeFrame.OneHour),
-                FourHourCandles = _candles.Get(update.Symbol, TimeFrame.FourHours)
+                EntryCandles = _candles.Get(update.Symbol, TimeFrame.FifteenMinutes),
+                MediumTrendCandles = _candles.Get(update.Symbol, TimeFrame.ThirtyMinutes),
+                HigherTrendCandles = _candles.Get(update.Symbol, TimeFrame.OneHour)
             })));
         await SaveAsync(cancellationToken);
         var entryPrice = await _executor.OpenMarketPositionAsync(update.Symbol, signal.Direction, quantity, stop, take,
             _state.PendingOrder, cancellationToken);
-        _state.Position = new SavedPosition(update.Symbol, signal.Direction, quantity, stop, take, DateTimeOffset.UtcNow, entryId);
+        var opened = new SavedPosition(update.Symbol, signal.Direction, quantity, stop, take, DateTimeOffset.UtcNow, entryId);
+        _state.Positions.Add(opened);
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":response", entryId, update.Symbol,
             "entry_response", DateTimeOffset.UtcNow, JsonSerializer.Serialize(new
-            { Position = _state.Position, Receipt = entryPrice })));
+            { Position = opened, Receipt = entryPrice })));
         await SaveAsync(cancellationToken);
         await _executor.ValidateProtectionAsync(update.Symbol, signal.Direction, quantity, cancellationToken);
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":protected", entryId, update.Symbol,
-            "entry_protected", DateTimeOffset.UtcNow, JsonSerializer.Serialize(_state.Position)));
+            "entry_protected", DateTimeOffset.UtcNow, JsonSerializer.Serialize(opened)));
         _state.PendingOrder = null;
         await SaveAsync(cancellationToken);
         _logger.LogWarning("LIVE OPEN {Direction} {Symbol} | quantity={Quantity} | exchange SL={Stop} TP={Take}",

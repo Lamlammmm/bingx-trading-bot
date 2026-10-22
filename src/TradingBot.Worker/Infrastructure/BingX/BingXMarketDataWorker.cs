@@ -99,7 +99,7 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
         contractStore.Upsert(symbol, contract);
 
         var loadedHistory = new Dictionary<TimeFrame, IReadOnlyList<Candle>>();
-        foreach (var timeFrame in new[] { TimeFrame.FiveMinutes, TimeFrame.OneHour, TimeFrame.FourHours })
+        foreach (var timeFrame in new[] { TimeFrame.FiveMinutes, TimeFrame.FifteenMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
         {
             var candles = await marketClient.GetCandlesAsync(symbol, timeFrame, _options.HistoryLimit, cancellationToken);
             foreach (var candle in candles) candleStore.Upsert(symbol, timeFrame, candle);
@@ -121,15 +121,15 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
                 continue;
             }
 
-            if (timeFrame == TimeFrame.FiveMinutes)
+            if (timeFrame is TimeFrame.FiveMinutes or TimeFrame.FifteenMinutes)
             {
                 if (_lastPublishedOpenTimes.TryGetValue((symbol, timeFrame), out var lastPublished))
                 {
                     var missedCandles = candles.Where(candle => candle.OpenTime > lastPublished).ToArray();
                     if (missedCandles.Length > 0)
                     {
-                        logger.LogWarning("BingX reconnect missed {MissedCount} closed 5m candles for {Symbol}; replaying them for paper position protection and skipping new entries during reconciliation",
-                            missedCandles.Length, symbol);
+                        logger.LogWarning("BingX reconnect missed {MissedCount} closed {TimeFrame} candles for {Symbol}; replaying them for paper position protection and skipping new entries during reconciliation",
+                            missedCandles.Length, timeFrame, symbol);
                         foreach (var missedCandle in missedCandles)
                         {
                             await PublishClosedCandleAsync(new MarketUpdate(symbol, timeFrame,
@@ -156,9 +156,9 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
         await updates.Writer.WriteAsync(update, cancellationToken);
         _lastPublishedOpenTimes[key] = update.Candle.OpenTime;
 
-        if (update.TimeFrame == TimeFrame.FiveMinutes)
+        if (update.TimeFrame == TimeFrame.FifteenMinutes)
         {
-            logger.LogInformation("Received closed 5m candle for {Symbol}: openTime={OpenTime}, closeTime={CloseTime}, open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}",
+            logger.LogInformation("Received closed 15m candle for {Symbol}: openTime={OpenTime}, closeTime={CloseTime}, open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}",
                 update.Symbol, update.Candle.OpenTime, update.Candle.CloseTime, update.Candle.Open, update.Candle.High,
                 update.Candle.Low, update.Candle.Close, update.Candle.Volume);
         }

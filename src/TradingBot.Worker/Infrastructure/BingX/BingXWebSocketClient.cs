@@ -21,7 +21,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
         await socket.ConnectAsync(new Uri(_options.WebSocketUrl), cancellationToken);
         foreach (var symbol in symbols)
         {
-            foreach (var interval in new[] { "5m", "1h", "4h" })
+            foreach (var interval in new[] { "5m", "15m", "30m", "1h" })
             {
                 var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{symbol}@kline_{interval}" });
                 await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
@@ -52,7 +52,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
 
             foreach (var update in parsedUpdates)
             {
-                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FiveMinutes)
+                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FifteenMinutes)
                 {
                     logger.LogInformation("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
                         update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,
@@ -104,6 +104,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
                 "1m" => TimeFrame.OneMinute,
                 "5m" => TimeFrame.FiveMinutes,
                 "15m" => TimeFrame.FifteenMinutes,
+                "30m" => TimeFrame.ThirtyMinutes,
                 "1h" => TimeFrame.OneHour,
                 "4h" => TimeFrame.FourHours,
                 _ => (TimeFrame?)null
@@ -160,6 +161,7 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
         TimeFrame.OneMinute => TimeSpan.FromMinutes(1),
         TimeFrame.FiveMinutes => TimeSpan.FromMinutes(5),
         TimeFrame.FifteenMinutes => TimeSpan.FromMinutes(15),
+        TimeFrame.ThirtyMinutes => TimeSpan.FromMinutes(30),
         TimeFrame.OneHour => TimeSpan.FromHours(1),
         TimeFrame.FourHours => TimeSpan.FromHours(4),
         _ => throw new ArgumentOutOfRangeException(nameof(timeFrame))

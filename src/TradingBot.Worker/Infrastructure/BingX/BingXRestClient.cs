@@ -15,6 +15,7 @@ public sealed class BingXRestClient(HttpClient httpClient, ILogger<BingXRestClie
             TimeFrame.OneMinute => "1m",
             TimeFrame.FiveMinutes => "5m",
             TimeFrame.FifteenMinutes => "15m",
+            TimeFrame.ThirtyMinutes => "30m",
             TimeFrame.OneHour => "1h",
             TimeFrame.FourHours => "4h",
             _ => throw new ArgumentOutOfRangeException(nameof(timeFrame))
@@ -83,6 +84,7 @@ public sealed class BingXRestClient(HttpClient httpClient, ILogger<BingXRestClie
         TimeFrame.OneMinute => TimeSpan.FromMinutes(1),
         TimeFrame.FiveMinutes => TimeSpan.FromMinutes(5),
         TimeFrame.FifteenMinutes => TimeSpan.FromMinutes(15),
+        TimeFrame.ThirtyMinutes => TimeSpan.FromMinutes(30),
         TimeFrame.OneHour => TimeSpan.FromHours(1),
         TimeFrame.FourHours => TimeSpan.FromHours(4),
         _ => throw new ArgumentOutOfRangeException(nameof(timeFrame))

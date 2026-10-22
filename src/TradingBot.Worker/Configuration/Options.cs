@@ -66,10 +66,11 @@ public sealed class LiveOptions
     public decimal Leverage { get; set; } = 5m;
     public bool AutoLeverage { get; set; }
     public decimal MaxLeverage { get; set; } = 20m;
-    public int MaxOpenPositions { get; set; } = 1;
+    // Zero permits one bot position per configured symbol, subject to available margin.
+    public int MaxOpenPositions { get; set; }
+    public decimal MaxMarginUsagePercent { get; set; } = 20m;
     public decimal StopAtrMultiplier { get; set; } = 1.5m;
     public decimal TakeProfitRiskMultiple { get; set; } = 2m;
-    public int MaxHoldingMinutes { get; set; } = 60;
 }
 
 public sealed class PersistenceOptions
@@ -85,7 +86,6 @@ public sealed class PaperTradingOptions
     public const string SectionName = "PaperTrading";
     public decimal SlippageBasisPoints { get; set; } = 2m;
     public decimal FundingRatePerEightHours { get; set; }
-    public int MaxHoldingMinutes { get; set; } = 60;
 }
 
 public sealed class OpenAIOptions
