@@ -1,16 +1,72 @@
 services:
   trading-bot:
+    image: ${BOT_IMAGE:-bingx-trading-bot:local}
     build: .
     restart: unless-stopped
+    stop_grace_period: 60s
+    ports:
+      - "127.0.0.1:${BOT_HTTP_PORT:-8080}:8080"
     environment:
-      TRADINGBOT__BINGX__SYMBOL: ${TRADINGBOT__BINGX__SYMBOL:-BTC-USDT}
-      TRADINGBOT__BINGX__HISTORYLIMIT: ${TRADINGBOT__BINGX__HISTORYLIMIT:-250}
-      TRADINGBOT__RISK__STARTINGBALANCE: ${TRADINGBOT__RISK__STARTINGBALANCE:-10000}
-      TRADINGBOT__RISK__RISKPERTRADEPERCENT: ${TRADINGBOT__RISK__RISKPERTRADEPERCENT:-0.5}
-      TRADINGBOT__RISK__MAXDAILYLOSSPERCENT: ${TRADINGBOT__RISK__MAXDAILYLOSSPERCENT:-2}
-      TRADINGBOT__RISK__MAXLEVERAGE: ${TRADINGBOT__RISK__MAXLEVERAGE:-3}
-      TRADINGBOT__OPENAI__ENABLED: ${TRADINGBOT__OPENAI__ENABLED:-false}
-      TRADINGBOT__OPENAI__MODEL: ${TRADINGBOT__OPENAI__MODEL:-gpt-5.2}
+      DOTNET_ENVIRONMENT: Production
+      ASPNETCORE_HTTP_PORTS: 8080
+      API__KEY: ${BOT_API_KEY:?Set BOT_API_KEY in .env}
+      BOT__ENABLED: ${BOT_ENABLED:-true}
+      LIVE__ENABLED: ${LIVE_ENABLED:-false}
+      LIVE__STATEPATH: /app/data/live-state.json
+      LIVE__LEVERAGE: ${LIVE_LEVERAGE:-5}
+      LIVE__AUTOLEVERAGE: ${LIVE_AUTO_LEVERAGE:-true}
+      LIVE__MAXLEVERAGE: ${LIVE_MAX_LEVERAGE:-20}
+      LIVE__MAXOPENPOSITIONS: ${LIVE_MAX_OPEN_POSITIONS:-0}
+      LIVE__MAXMARGINUSAGEPERCENT: ${LIVE_MAX_MARGIN_USAGE_PERCENT:-20}
+      PERSISTENCE__PROVIDER: ${PERSISTENCE_PROVIDER:-Sqlite}
+      PERSISTENCE__DATABASEPATH: /app/data/tradingbot.db
+      PERSISTENCE__CONNECTIONSTRING: ${SUPABASE_DB_CONNECTION_STRING:-}
+      BINGX__HISTORYLIMIT: ${BINGX__HISTORYLIMIT:-250}
+      RISK__STARTINGBALANCE: ${RISK__STARTINGBALANCE:-10000}
+      RISK__RISKPERTRADEPERCENT: ${RISK__RISKPERTRADEPERCENT:-0.5}
+      RISK__MAXDAILYLOSSPERCENT: ${RISK__MAXDAILYLOSSPERCENT:-2}
+      RISK__MAXLEVERAGE: ${RISK__MAXLEVERAGE:-20}
+      RISK__TARGETPROFITUSDT: ${RISK__TARGETPROFITUSDT:-0}
+      OPENAI__ENABLED: ${OPENAI__ENABLED:-false}
+      OPENAI__MODEL: ${OPENAI__MODEL:-gpt-5.2}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       BINGX_API_KEY: ${BINGX_API_KEY:-}
       BINGX_API_SECRET: ${BINGX_API_SECRET:-}
+      SEQ__URL: ${SEQ_URL:-}
+    volumes:
+      - bot-data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Structured log server - browse/search/filter logs at http://localhost:5341
+  seq:
+    image: datalust/seq:latest
+    restart: unless-stopped
+    profiles: ["tools"]
+    environment:
+      ACCEPT_EULA: Y
+      SEQ_FIRSTRUN_NOAUTHENTICATION: "true"
+    ports:
+      - "127.0.0.1:5341:80"
+    volumes:
+      - ./data/seq:/data
+
+  # Web UI to browse/query the SQLite trade database at http://localhost:8080
+  # (SQLite itself is an embedded file DB, not a server - this is just a viewer).
+  sqlite-web:
+    image: coleifer/sqlite-web
+    restart: unless-stopped
+    profiles: ["tools"]
+    ports:
+      - "127.0.0.1:8081:8080"
+    volumes:
+      - bot-data:/data:ro
+    command: ["sqlite_web", "/data/tradingbot.db", "--host", "0.0.0.0", "--read-only"]
+    depends_on:
+      - trading-bot
+
+volumes:
+  bot-data:

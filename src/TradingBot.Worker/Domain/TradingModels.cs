@@ -1,6 +1,7 @@
 namespace TradingBot.Worker.Domain;
 
-public enum TimeFrame { FifteenMinutes, OneHour, FourHours }
+// Append new values so persisted enum numbers retain their original meaning.
+public enum TimeFrame { OneMinute, FiveMinutes, FifteenMinutes, OneHour, FourHours, ThirtyMinutes }
 public enum TradeDirection { Long, Short }
 
 public sealed record Candle(
@@ -13,7 +14,7 @@ public sealed record Candle(
     decimal Volume,
     bool IsClosed);
 
-public sealed record MarketUpdate(TimeFrame TimeFrame, Candle Candle);
+public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle, bool IsReconciliation = false);
 
 public sealed record StrategySignal(
     string Symbol,
@@ -30,9 +31,9 @@ public sealed record StrategySignal(
 public sealed record AiAnalysisContext(
     string Symbol,
     DateTimeOffset CandleTime,
-    IReadOnlyList<Candle> FifteenMinuteCandles,
-    IReadOnlyList<Candle> OneHourCandles,
-    IReadOnlyList<Candle> FourHourCandles,
+    IReadOnlyList<Candle> EntryCandles,
+    IReadOnlyList<Candle> MediumTrendCandles,
+    IReadOnlyList<Candle> HigherTrendCandles,
     StrategySignal? TechnicalSignal);
 
 public sealed record AiDecision(
@@ -61,6 +62,19 @@ public sealed record TradePlan(
     decimal EntryFee,
     string Reason);
 
+public sealed record TradeFeatures(
+    decimal Rsi5m,
+    decimal Rsi15m,
+    decimal Rsi1h,
+    decimal Atr5m,
+    decimal EmaFast5m,
+    decimal EmaSlow5m,
+    decimal VolumeRatio5m,
+    decimal BodyRatio5m,
+    decimal Confidence,
+    int HourOfDayUtc,
+    int DayOfWeekUtc);
+
 public sealed record PaperPosition(
     string Symbol,
     TradeDirection Direction,
@@ -70,7 +84,12 @@ public sealed record PaperPosition(
     decimal TakeProfit,
     decimal RiskAmount,
     decimal EntryFee,
-    DateTimeOffset OpenedAt);
+    DateTimeOffset OpenedAt,
+    TradeFeatures? EntryFeatures = null,
+    decimal InitialStopLoss = 0m,
+    bool PartialTaken = false,
+    decimal InitialQuantity = 0m,
+    decimal RealizedPartialPnl = 0m);
 
 public sealed record ContractInfo(
     string Symbol,
@@ -79,3 +98,35 @@ public sealed record ContractInfo(
     decimal MinimumQuantity,
     decimal MinimumOrderValue,
     bool IsActive);
+
+public sealed record AccountState(
+    decimal Balance,
+    DateOnly BalanceDate,
+    decimal RealizedPnlToday,
+    int TotalWins = 0,
+    int TotalLosses = 0,
+    decimal TotalNetPnl = 0m);
+
+public sealed record TradePerformance(int Wins, int Losses, decimal TotalNetPnl);
+
+public sealed record ClosedTrade(
+    string Symbol,
+    TradeDirection Direction,
+    decimal Quantity,
+    decimal EntryPrice,
+    decimal ExitPrice,
+    decimal StopLoss,
+    decimal TakeProfit,
+    decimal NetPnl,
+    string ExitReason,
+    string Source,
+    DateTimeOffset OpenedAt,
+    DateTimeOffset ClosedAt,
+    TradeFeatures? EntryFeatures = null);
+
+public sealed record StoredPaperTrade(long Id, ClosedTrade Trade, StoredTradeFeatures Features);
+
+public sealed record StoredTradeFeatures(
+    decimal? Rsi5m, decimal? Rsi15m, decimal? Rsi1h, decimal? Atr5m,
+    decimal? EmaFast5m, decimal? EmaSlow5m, decimal? VolumeRatio5m,
+    decimal? BodyRatio5m, decimal? Confidence, int? HourOfDayUtc, int? DayOfWeekUtc);

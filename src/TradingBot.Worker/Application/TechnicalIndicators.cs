@@ -23,33 +23,47 @@ public static class TechnicalIndicators
     public static decimal LowestLow(IReadOnlyList<Candle> candles, int period) =>
         candles.Count < period ? 0m : candles.TakeLast(period).Min(candle => candle.Low);
 
+    // Wilder's smoothing (RMA): seed with the simple average of the first `period` values, then
+    // recursively smooth over the remaining history so the value reflects the whole series, not
+    // just a fresh average of the trailing window (matches standard TradingView/exchange indicators).
     public static decimal Atr(IReadOnlyList<Candle> candles, int period)
     {
         if (candles.Count < period + 1) return 0m;
-        var trueRanges = new List<decimal>(period);
-        for (var index = candles.Count - period; index < candles.Count; index++)
+        var trueRanges = new List<decimal>(candles.Count - 1);
+        for (var index = 1; index < candles.Count; index++)
         {
             var current = candles[index];
             var previous = candles[index - 1];
             trueRanges.Add(Math.Max(current.High - current.Low,
                 Math.Max(Math.Abs(current.High - previous.Close), Math.Abs(current.Low - previous.Close))));
         }
-        return trueRanges.Average();
+
+        var atr = trueRanges.Take(period).Average();
+        for (var index = period; index < trueRanges.Count; index++)
+            atr = ((atr * (period - 1)) + trueRanges[index]) / period;
+        return atr;
     }
 
     public static decimal Rsi(IReadOnlyList<Candle> candles, int period)
     {
         if (candles.Count < period + 1) return 50m;
-        decimal gainSum = 0m, lossSum = 0m;
-        for (var index = candles.Count - period; index < candles.Count; index++)
+        var gains = new List<decimal>(candles.Count - 1);
+        var losses = new List<decimal>(candles.Count - 1);
+        for (var index = 1; index < candles.Count; index++)
         {
             var change = candles[index].Close - candles[index - 1].Close;
-            if (change >= 0) gainSum += change;
-            else lossSum -= change;
+            gains.Add(change >= 0 ? change : 0m);
+            losses.Add(change < 0 ? -change : 0m);
         }
-        if (lossSum == 0m) return 100m;
-        var averageGain = gainSum / period;
-        var averageLoss = lossSum / period;
+
+        var averageGain = gains.Take(period).Average();
+        var averageLoss = losses.Take(period).Average();
+        for (var index = period; index < gains.Count; index++)
+        {
+            averageGain = ((averageGain * (period - 1)) + gains[index]) / period;
+            averageLoss = ((averageLoss * (period - 1)) + losses[index]) / period;
+        }
+
         if (averageLoss == 0m) return 100m;
         var relativeStrength = averageGain / averageLoss;
         return 100m - (100m / (1m + relativeStrength));

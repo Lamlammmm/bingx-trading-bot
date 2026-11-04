@@ -1,0 +1,5 @@
+simulation: bingx-history-recovery
+routing: path
+mocks:
+  - routeKey: bingx
+    path: ../mocks/bingx-history-recovery/config.yaml

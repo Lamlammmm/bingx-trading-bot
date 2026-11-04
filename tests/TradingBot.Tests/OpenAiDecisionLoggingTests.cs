@@ -17,7 +17,7 @@ public sealed class OpenAiDecisionLoggingTests
             "No confirmed breakout", "Wait for a closed candle above resistance");
         var engine = CreateEngine(decision, null, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiNoTrade"));
         Assert.Contains("AI RESULT: NO_TRADE", resultLog.Message, StringComparison.Ordinal);
@@ -34,7 +34,7 @@ public sealed class OpenAiDecisionLoggingTests
             100m, 2m, "technical confirmation");
         var engine = CreateEngine(decision, technicalSignal, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiTrade"));
         Assert.Equal(LogLevel.Warning, resultLog.Level);
@@ -47,7 +47,7 @@ public sealed class OpenAiDecisionLoggingTests
         var logger = new ListLogger<PaperTradingEngine>();
         var engine = CreateEngine(null, null, logger);
 
-        await engine.ProcessAsync(CreateClosedUpdate(), "BTC-USDT", CancellationToken.None);
+        await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiError"));
         Assert.Equal(LogLevel.Error, resultLog.Level);
@@ -55,13 +55,30 @@ public sealed class OpenAiDecisionLoggingTests
         Assert.DoesNotContain(logger.Messages, message => message.Contains("AI RESULT: NO_TRADE", StringComparison.Ordinal));
     }
 
+    [Fact]
+    public async Task SkipsNewEntryDuringReconciliation()
+    {
+        var logger = new ListLogger<PaperTradingEngine>();
+        var decision = new AiDecision("long", 0.8m, 100m, 97m, 106m,
+            "Confirmed breakout", "Close below support");
+        var engine = CreateEngine(decision,
+            new StrategySignal("BTC-USDT", TradeDirection.Long, DateTimeOffset.UtcNow, 100m, 2m, "technical confirmation"), logger);
+
+        var update = CreateClosedUpdate() with { IsReconciliation = true };
+        await engine.ProcessAsync(update, CancellationToken.None);
+
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("PAPER OPEN", StringComparison.Ordinal));
+    }
+
     private static PaperTradingEngine CreateEngine(AiDecision? decision, StrategySignal? technicalSignal,
         ILogger<PaperTradingEngine> logger)
     {
         var store = new InMemoryCandleStore();
+        var contractStore = new InMemoryContractStore();
+        contractStore.Upsert("BTC-USDT", new ContractInfo("BTC-USDT", 4m, 1m, 0.0001m, 2m, true));
         return new PaperTradingEngine(store, new StubStrategy(technicalSignal),
-            new RiskManager(Options.Create(new RiskOptions())), new StubAnalyzer(decision),
-            Options.Create(new RiskOptions()), Options.Create(new OpenAIOptions
+            new RiskManager(Options.Create(new RiskOptions())), new StubAnalyzer(decision), new NoOpTradeStore(),
+            contractStore, Options.Create(new RiskOptions()), Options.Create(new PaperTradingOptions()), Options.Create(new OpenAIOptions
             {
                 Enabled = true,
                 MaximumEntryDeviationPercent = 0.25m
@@ -70,9 +87,9 @@ public sealed class OpenAiDecisionLoggingTests
 
     private static MarketUpdate CreateClosedUpdate()
     {
-        var openTime = DateTimeOffset.UtcNow.AddMinutes(-15);
-        return new MarketUpdate(TimeFrame.FifteenMinutes,
-            new Candle(openTime, openTime.AddMinutes(15), 99m, 101m, 98m, 100m, 10m, true));
+        var openTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        return new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
+            new Candle(openTime, openTime.AddMinutes(5), 99m, 101m, 98m, 100m, 10m, true));
     }
 
     private sealed class StubAnalyzer(AiDecision? decision) : IOpenAiAnalyzer
@@ -87,8 +104,22 @@ public sealed class OpenAiDecisionLoggingTests
 
     private sealed class StubStrategy(StrategySignal? signal) : ITradingStrategy
     {
-        public StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> fifteenMinuteCandles,
-            IReadOnlyList<Candle> oneHourCandles, IReadOnlyList<Candle> fourHourCandles) => signal;
+        public StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> entryCandles,
+            IReadOnlyList<Candle> fifteenMinuteCandles, IReadOnlyList<Candle> oneHourCandles) => signal;
+    }
+
+    private sealed class NoOpTradeStore : ITradeStore
+    {
+        public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken) => Task.FromResult<AccountState?>(null);
+        public Task<TradePerformance?> LoadTradePerformanceAsync(CancellationToken cancellationToken) => Task.FromResult<TradePerformance?>(null);
+        public async IAsyncEnumerable<StoredPaperTrade> ReadClosedTradesAsync(
+            [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+        { await Task.CompletedTask; yield break; }
+        public Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task<IReadOnlyList<PaperPosition>> LoadOpenPositionsAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<PaperPosition>>(Array.Empty<PaperPosition>());
+        public Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class ListLogger<T> : ILogger<T>

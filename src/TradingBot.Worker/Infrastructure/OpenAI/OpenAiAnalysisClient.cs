@@ -63,9 +63,9 @@ public sealed class OpenAiAnalysisClient(HttpClient httpClient, IOptions<OpenAIO
                                 },
                                 candles = new
                                 {
-                                    fifteenMinute = ToCompactCandles(context.FifteenMinuteCandles, _options.CandleCountPerTimeFrame),
-                                    oneHour = ToCompactCandles(context.OneHourCandles, _options.CandleCountPerTimeFrame),
-                                    fourHour = ToCompactCandles(context.FourHourCandles, _options.CandleCountPerTimeFrame)
+                                    entryTimeframe = ToCompactCandles(context.EntryCandles, _options.CandleCountPerTimeFrame),
+                                    mediumTrend = ToCompactCandles(context.MediumTrendCandles, _options.CandleCountPerTimeFrame),
+                                    higherTrend = ToCompactCandles(context.HigherTrendCandles, _options.CandleCountPerTimeFrame)
                                 }
                             })
                         }

@@ -5,16 +5,17 @@ namespace TradingBot.Worker.Application;
 public sealed class InMemoryCandleStore : ICandleStore
 {
     private readonly object _sync = new();
-    private readonly Dictionary<TimeFrame, List<Candle>> _candles = new();
+    private readonly Dictionary<(string Symbol, TimeFrame TimeFrame), List<Candle>> _candles = new();
 
-    public void Upsert(TimeFrame timeFrame, Candle candle)
+    public void Upsert(string symbol, TimeFrame timeFrame, Candle candle)
     {
         lock (_sync)
         {
-            if (!_candles.TryGetValue(timeFrame, out var candles))
+            var key = (symbol, timeFrame);
+            if (!_candles.TryGetValue(key, out var candles))
             {
                 candles = new List<Candle>();
-                _candles[timeFrame] = candles;
+                _candles[key] = candles;
             }
 
             var index = candles.FindIndex(existing => existing.OpenTime == candle.OpenTime);
@@ -25,11 +26,11 @@ public sealed class InMemoryCandleStore : ICandleStore
         }
     }
 
-    public IReadOnlyList<Candle> Get(TimeFrame timeFrame)
+    public IReadOnlyList<Candle> Get(string symbol, TimeFrame timeFrame)
     {
         lock (_sync)
         {
-            return _candles.TryGetValue(timeFrame, out var candles) ? candles.ToArray() : Array.Empty<Candle>();
+            return _candles.TryGetValue((symbol, timeFrame), out var candles) ? candles.ToArray() : Array.Empty<Candle>();
         }
     }
 }

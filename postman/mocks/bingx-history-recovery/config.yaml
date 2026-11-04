@@ -1,0 +1,11 @@
+version: 1
+id: 93497aab-3319-4fbd-b7e3-986c22a7986c
+name: bingx-history-recovery
+slug: bingx-history-recovery
+protocol: http
+interceptRequests: true
+port: 4500
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true
