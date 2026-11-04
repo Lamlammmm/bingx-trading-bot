@@ -1,0 +1,121 @@
+name: Bot CI and Ubuntu deploy
+
+on:
+  push:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bot-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 8.0.x
+      - name: Test .NET
+        run: dotnet test BingXTradingBot.sln -c Release --logger trx --results-directory artifacts/test-results
+      - name: Build release image
+        run: |
+          image="bingx-trading-bot:${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "BOT_IMAGE=$image" >> "$GITHUB_ENV"
+          docker build --tag "$image" .
+      - name: Install Postman CLI
+        run: |
+          curl --fail --silent --show-error --location https://dl-cli.pstmn.io/install/unix.sh -o "$RUNNER_TEMP/install-postman.sh"
+          sh "$RUNNER_TEMP/install-postman.sh"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Test HTTP in the release image without trading
+        run: |
+          docker run --detach --name bot-api-smoke \
+            --publish 127.0.0.1:5087:8080 \
+            --env Bot__Enabled=false --env Live__Enabled=false \
+            --env Api__Key=local-api-smoke-key "$BOT_IMAGE"
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:5087/health/live >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:5087/health/live
+          postman collection run postman/bot-api.postman_collection.json \
+            --no-report-events --timeout-request 5000 --output artifacts/postman
+      - name: Package the tested image for Ubuntu
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          mkdir -p release
+          docker save "$BOT_IMAGE" | gzip > release/image.tar.gz
+          printf '%s\n' "$BOT_IMAGE" > release/image.txt
+          cp docker-compose.yml deploy/ubuntu/deploy.sh release/
+      - name: Upload deployment package
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: ubuntu-release
+          path: release/
+          compression-level: 0
+          retention-days: 3
+          if-no-files-found: error
+      - name: Collect container logs
+        if: always()
+        run: |
+          mkdir -p artifacts
+          if docker inspect bot-api-smoke >/dev/null 2>&1; then
+            docker logs bot-api-smoke > artifacts/api-smoke.log 2>&1
+            docker rm --force bot-api-smoke
+          fi
+      - name: Upload verification reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: verification-reports
+          path: artifacts/
+          retention-days: 7
+
+  deploy:
+    needs: verify
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    environment: production
+    timeout-minutes: 20
+    concurrency:
+      group: bot-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ubuntu-release
+          path: release
+      - name: Copy tested release and deploy
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_PORT: ${{ vars.DEPLOY_PORT || '22' }}
+        run: |
+          : "${DEPLOY_HOST:?Set DEPLOY_HOST secret}"
+          : "${DEPLOY_USER:?Set DEPLOY_USER secret}"
+          : "${DEPLOY_SSH_KEY:?Set DEPLOY_SSH_KEY secret}"
+          : "${DEPLOY_KNOWN_HOSTS:?Set DEPLOY_KNOWN_HOSTS secret}"
+          umask 077
+          printf '%s\n' "$DEPLOY_SSH_KEY" > "$RUNNER_TEMP/deploy_key"
+          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/deploy_known_hosts"
+          ssh_options=(-i "$RUNNER_TEMP/deploy_key" -o BatchMode=yes -o StrictHostKeyChecking=yes
+            -o "UserKnownHostsFile=$RUNNER_TEMP/deploy_known_hosts" -o ConnectTimeout=15)
+          destination="${DEPLOY_USER}@${DEPLOY_HOST}"
+          release_dir="/opt/bingx-trading-bot/releases/${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          ssh "${ssh_options[@]}" -p "$DEPLOY_PORT" "$destination" "mkdir -p '$release_dir'"
+          scp "${ssh_options[@]}" -P "$DEPLOY_PORT" release/* "$destination:$release_dir/"
+          ssh "${ssh_options[@]}" -p "$DEPLOY_PORT" "$destination" "bash '$release_dir/deploy.sh'"

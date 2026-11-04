@@ -1,16 +1,20 @@
 using System.Threading.Channels;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Serilog;
 using Serilog.Sinks.SystemConsole.Themes;
 using TradingBot.Worker.Application;
 using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
+using TradingBot.Worker.Infrastructure;
 using TradingBot.Worker.Infrastructure.BingX;
 using TradingBot.Worker.Infrastructure.Live;
 using TradingBot.Worker.Infrastructure.OpenAI;
 using TradingBot.Worker.Infrastructure.PaperTrading;
 using TradingBot.Worker.Infrastructure.Persistence;
 
-var builder = Host.CreateApplicationBuilder(args);
+var builder = WebApplication.CreateBuilder(args);
 var seqUrl = builder.Configuration["Seq:Url"];
 builder.Logging.ClearProviders();
 var loggerConfiguration = new LoggerConfiguration()
@@ -28,6 +32,7 @@ else
 }
 Log.Logger = loggerConfiguration.CreateLogger();
 builder.Logging.AddSerilog(Log.Logger, dispose: true);
+builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
 builder.Services.Configure<BingXOptions>(builder.Configuration.GetSection(BingXOptions.SectionName));
 builder.Services.Configure<StrategyOptions>(builder.Configuration.GetSection(StrategyOptions.SectionName));
 builder.Services.Configure<RiskOptions>(builder.Configuration.GetSection(RiskOptions.SectionName));
@@ -37,6 +42,8 @@ builder.Services.Configure<PersistenceOptions>(builder.Configuration.GetSection(
 builder.Services.Configure<LiveOptions>(builder.Configuration.GetSection(LiveOptions.SectionName));
 builder.Services.PostConfigure<LiveOptions>(options =>
     options.StatePath = Path.GetFullPath(options.StatePath, builder.Environment.ContentRootPath));
+builder.Services.PostConfigure<PersistenceOptions>(options =>
+    options.DatabasePath = Path.GetFullPath(options.DatabasePath, builder.Environment.ContentRootPath));
 builder.Services.PostConfigure<BingXOptions>(options =>
 {
     var apiKey = Environment.GetEnvironmentVariable("BINGX_API_KEY");
@@ -93,7 +100,7 @@ builder.Services.AddSingleton<IOpenAiAnalyzer>(serviceProvider =>
 });
 builder.Services.AddSingleton<Channel<MarketUpdate>>(_ => Channel.CreateBounded<MarketUpdate>(new BoundedChannelOptions(1_000)
 {
-    FullMode = BoundedChannelFullMode.DropOldest,
+    FullMode = BoundedChannelFullMode.Wait,
     SingleReader = true,
     SingleWriter = true
 }));
@@ -113,8 +120,13 @@ builder.Services.AddSingleton<IBingXMarketStream, BingXWebSocketClient>();
 builder.Services.AddSingleton<PaperTradingEngine>();
 builder.Services.AddSingleton<ILiveExecutor, BingXLiveExecutor>();
 builder.Services.AddSingleton<LiveTradingEngine>();
-builder.Services.AddHostedService<BingXMarketDataWorker>();
-builder.Services.AddHostedService<TradingWorker>();
+builder.Services.AddSingleton<BotRuntimeState>();
+builder.Services.AddHealthChecks().AddCheck<BotReadinessHealthCheck>("bot", tags: new[] { "ready" });
+if (builder.Configuration.GetValue("Bot:Enabled", true))
+{
+    builder.Services.AddHostedService<BingXMarketDataWorker>();
+    builder.Services.AddHostedService<TradingWorker>();
+}
 
 using var host = builder.Build();
 if (args.Contains("--export-trade-analysis", StringComparer.OrdinalIgnoreCase))
@@ -226,4 +238,43 @@ if (args.Contains("--preflight", StringComparer.OrdinalIgnoreCase))
     Console.WriteLine($"PREFLIGHT READ-ONLY | USDT={balance} | positions={positions} | openOrders={orders} | Hedge mode verified");
     return;
 }
+var apiKey = host.Configuration["Api:Key"];
+if (string.IsNullOrWhiteSpace(apiKey))
+    throw new InvalidOperationException("Set Api:Key (Api__Key environment variable) before starting the HTTP host.");
+var apiKeyHash = SHA256.HashData(Encoding.UTF8.GetBytes(apiKey));
+host.Use(async (context, next) =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        var suppliedKey = context.Request.Headers["X-Api-Key"];
+        if (suppliedKey.Count != 1 || !CryptographicOperations.FixedTimeEquals(apiKeyHash,
+                SHA256.HashData(Encoding.UTF8.GetBytes(suppliedKey[0] ?? ""))))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+        context.Response.Headers.CacheControl = "no-store";
+    }
+    await next(context);
+});
+host.MapHealthChecks("/health/live", new HealthCheckOptions { Predicate = _ => false });
+host.MapHealthChecks("/health/ready", new HealthCheckOptions { Predicate = check => check.Tags.Contains("ready") });
+host.MapGet("/api/bot/status", (BotRuntimeState state, ICandleStore candles,
+    Microsoft.Extensions.Options.IOptions<BotOptions> botOptions,
+    Microsoft.Extensions.Options.IOptions<LiveOptions> liveOptions,
+    Microsoft.Extensions.Options.IOptions<BingXOptions> bingXOptions) => Results.Ok(new
+    {
+        Enabled = botOptions.Value.Enabled,
+        LiveTradingEnabled = botOptions.Value.Enabled && liveOptions.Value.Enabled,
+        EntryTimeFrame = "5m", TrendTimeFrames = new[] { "30m", "1h" },
+        Processing = state.Snapshot,
+        Symbols = bingXOptions.Value.Symbols.Select(symbol => new
+        {
+            Symbol = symbol,
+            LastClosedCandleAt = candles.Get(symbol, TimeFrame.FiveMinutes)
+                .LastOrDefault(candle => candle.IsClosed)?.CloseTime
+        }).ToArray()
+    }));
 await host.RunAsync();
+
+public partial class Program { }

@@ -5,3 +5,9 @@
 **/appsettings.Development.json
 outputs/
 work/
+artifacts/
+data/
+**/data/
+**/exports/
+**/TestResults/
+migration/

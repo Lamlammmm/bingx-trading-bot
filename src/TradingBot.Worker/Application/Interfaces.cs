@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using TradingBot.Worker.Domain;
 
 namespace TradingBot.Worker.Application;
@@ -22,7 +23,8 @@ public interface IBingXMarketClient
 
 public interface IBingXMarketStream
 {
-    Task StreamAsync(IReadOnlyList<string> symbols, Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken);
+    Task StreamAsync(IReadOnlyList<string> symbols, ChannelReader<string> additionalSymbols,
+        Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken);
 }
 
 public interface ITradingStrategy

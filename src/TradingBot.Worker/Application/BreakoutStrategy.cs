@@ -10,7 +10,8 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
     private readonly Dictionary<string, DateTimeOffset> _lastSignalTimeBySymbol = new();
     private readonly Dictionary<string, PendingBreakout> _pendingBySymbol = new();
 
-    private sealed record PendingBreakout(TradeDirection Direction, decimal Level, DateTimeOffset DetectedAt, string Reason);
+    private sealed record PendingBreakout(TradeDirection Direction, decimal Level, decimal AtrBeforeBreakout,
+        DateTimeOffset DetectedAt, string Reason);
 
     public StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> entryCandles,
         IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles)
@@ -25,7 +26,16 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
 
         var minimumCandles = Math.Max(_options.SlowEmaPeriod, Math.Max(_options.BreakoutLookback, _options.VolumeLookback)) + 1;
         if (entryCandles.Count < minimumCandles || mediumTrendCandles.Count < _options.SlowEmaPeriod || higherTrendCandles.Count < _options.SlowEmaPeriod)
+        {
+            _pendingBySymbol.Remove(symbol);
             return null;
+        }
+        if (signalTime - mediumTrendCandles[^1].CloseTime > TimeSpan.FromMinutes(30) ||
+            signalTime - higherTrendCandles[^1].CloseTime > TimeSpan.FromHours(1))
+        {
+            _pendingBySymbol.Remove(symbol);
+            return null;
+        }
 
         var current = entryCandles[^1];
         var atr = TechnicalIndicators.Atr(entryCandles, _options.AtrPeriod);
@@ -41,12 +51,17 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
             else
             {
                 if (current.OpenTime <= pending.DetectedAt) return null;
+                // A missed update must not revive a setup that already closed back through the level.
+                var failed = entryCandles.Any(candle => candle.OpenTime > pending.DetectedAt &&
+                    (pending.Direction == TradeDirection.Long ? candle.Close < pending.Level : candle.Close > pending.Level));
+                if (failed)
+                {
+                    _pendingBySymbol.Remove(symbol);
+                    return null;
+                }
                 var confirmed = pending.Direction == TradeDirection.Long
                     ? current.Low <= pending.Level && current.Close > pending.Level
                     : current.High >= pending.Level && current.Close < pending.Level;
-                var failed = pending.Direction == TradeDirection.Long
-                    ? current.Close < pending.Level
-                    : current.Close > pending.Level;
 
                 if (confirmed)
                 {
@@ -55,6 +70,8 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
                     var retestBodyRatio = TechnicalIndicators.BodyRatio(current);
                     var retestAverageVolume = TechnicalIndicators.AverageVolume(retestPreviousCandles, _options.VolumeLookback);
                     var retestQualityIsValid = retestAverageVolume > 0m &&
+                        (_options.MaxRetestEntryDistanceAtr == 0m ||
+                            Math.Abs(current.Close - pending.Level) <= pending.AtrBeforeBreakout * _options.MaxRetestEntryDistanceAtr) &&
                         retestBodyRatio >= _options.MinimumBodyRatio &&
                         current.Volume < retestAverageVolume * _options.MaximumVolumeMultiplier &&
                         (pending.Direction == TradeDirection.Long
@@ -74,12 +91,7 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
 
                     _lastSignalTimeBySymbol[symbol] = current.OpenTime;
                     return new StrategySignal(symbol, pending.Direction, current.CloseTime, current.Close, atr,
-                        $"{pending.Reason}; level retested and held; closed medium/higher trends and candle direction reconfirmed");
-                }
-
-                if (failed)
-                {
-                    _pendingBySymbol.Remove(symbol);
+                        $"{pending.Reason}; level retested and held; entry distance={Math.Abs(current.Close - pending.Level):0.########}; ATR before breakout={pending.AtrBeforeBreakout:0.########}; closed medium/higher trends and candle direction reconfirmed");
                 }
                 // otherwise: still waiting, keep pending for another bar within the confirmation window
                 return null;
@@ -90,6 +102,8 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
             current.OpenTime - existingLastSignalTime < barDuration * _options.SignalCooldownBars) return null;
 
         var previousCandles = entryCandles.SkipLast(1).ToArray();
+        var atrBeforeBreakout = TechnicalIndicators.Atr(previousCandles, _options.AtrPeriod);
+        if (atrBeforeBreakout <= 0m) return null;
         var rsi = TechnicalIndicators.Rsi(previousCandles, _options.RsiPeriod);
         var bodyRatio = TechnicalIndicators.BodyRatio(current);
         var averageVolume = TechnicalIndicators.AverageVolume(previousCandles, _options.VolumeLookback);
@@ -100,18 +114,18 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
         if (averageVolume <= 0m || bodyRatio < _options.MinimumBodyRatio ||
             current.Volume >= averageVolume * _options.MaximumVolumeMultiplier) return null;
 
-        if (bullishTrend && current.Close > recentHigh && current.Volume >= averageVolume * _options.VolumeMultiplier
+        if (bullishTrend && current.Close > current.Open && current.Close > recentHigh && current.Volume >= averageVolume * _options.VolumeMultiplier
             && rsi < _options.RsiOverbought)
         {
-            _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Long, recentHigh, current.OpenTime,
+            _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Long, recentHigh, atrBeforeBreakout, current.OpenTime,
                 $"Medium/higher trends bullish; entry-TF close broke {recentHigh:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
             return null;
         }
 
-        if (bearishTrend && current.Close < recentLow && current.Volume >= averageVolume * _options.VolumeMultiplier
+        if (bearishTrend && current.Close < current.Open && current.Close < recentLow && current.Volume >= averageVolume * _options.VolumeMultiplier
             && rsi > _options.RsiOversold)
         {
-            _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Short, recentLow, current.OpenTime,
+            _pendingBySymbol[symbol] = new PendingBreakout(TradeDirection.Short, recentLow, atrBeforeBreakout, current.OpenTime,
                 $"Medium/higher trends bearish; entry-TF close broke {recentLow:0.########}; volume {current.Volume:0.########} >= {averageVolume * _options.VolumeMultiplier:0.########}; RSI={rsi:0.#}; body={bodyRatio:0.##}");
             return null;
         }

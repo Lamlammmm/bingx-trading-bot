@@ -1,5 +1,11 @@
 # Live Trading
 
+The project now hosts the engines in ASP.NET Core background services. HTTP
+startup requires `Api__Key`; diagnostic/export modes below still exit without
+starting HTTP or workers. See [Ubuntu deployment](DEPLOY_UBUNTU.md) for Docker,
+state/database migration and monitoring. Compose overrides live to off unless
+`LIVE_ENABLED=true` is set explicitly.
+
 Live is enabled in appsettings.json. One worker manages multiple USDT perpetual
 positions in Hedge mode, with at most one bot position per symbol. `Live:MaxOpenPositions=0`
 removes the overall count limit; a positive value sets an optional bot-position limit.
@@ -9,7 +15,8 @@ Do not manually add to or change a bot-managed symbol: exchange quantity/side
 must still match its saved state.
 
 Each entry reads current available USDT margin. Quantity is the smaller of:
-- the existing `Risk:RiskPerTradePercent` budget divided by the ATR stop distance;
+- the `Risk:RiskPerTradePercent` budget divided by ATR stop distance plus estimated
+  entry/exit fees at the stop price;
 - the margin-funded quantity, using `Live:MaxMarginUsagePercent` (20% of current
   available margin) and reserving estimated entry/exit fees from `Risk:FeeRate`.
 
@@ -21,23 +28,36 @@ must meet exchange minimums. TP distance must exceed estimated trading fees;
 funding, real slippage and fee-tier differences can still reduce net profit.
 
 Signals require breakout/retest, volume/body/RSI filters, and aligned closed
-30m/1h trends on 15m entry candles. Retest reconfirms both trends and candle direction; forming/future
-trend candles are excluded. These checks have automated tests, but no measured
-win-rate or profitability improvement is claimed. AI decisions do not control live entries.
+30m/1h trends on 5m entry candles. Retest reconfirms both trends and candle direction; forming/future
+trend candles are excluded. Breakout candles must agree with the entry direction.
+Retest entry distance from the broken level is capped by
+`Strategy:MaxRetestEntryDistanceAtr` times the ATR calculated BEFORE the breakout
+candle (default 1; zero disables only this distance filter). Spikes cannot enlarge
+that frozen ATR allowance. A closed bar through the wrong side of the level
+invalidates the setup, including an intermediate bar recovered in candle history.
+Missing or stale trend history cancels pending setups; the latest closed 30m/1h
+candles must be no more than 30/60 minutes older than the entry candle.
+
+Engines freeze closed entry/trend snapshots at the triggering candle's close
+time. Queued newer candles cannot change the strategy inputs, paper AI/features
+or the live entry journal while that update is processed.
+These checks have automated tests, but no measured win-rate or profitability
+improvement is claimed. The distance setting is a conservative initial filter,
+not a parameter optimized on backtests. AI decisions do not control live entries.
 
 Time-based exits have been removed from both live and paper execution.
 There is no `MaxHoldingMinutes` option; old values are ignored by this build.
 Bot-managed live positions remain open until the exchange SL or TP closes them.
 Restart the worker manually to load this build. Paper retains its configured
-partial-TP behavior and checks protection on 5m candles; only closed 15m candles
-can trigger entries. Retest 5 bars is a 75-minute window; cooldown 12 bars is 3 hours.
+partial-TP behavior and checks protection on 5m candles; only closed 5m candles
+can trigger entries. Retest 5 bars is a 25-minute window; cooldown 12 bars is 1 hour.
 
 ## Check Before Restart
 
 Run this from the repository root. It does not start the trading loop or place orders:
 
 ```powershell
-dotnet artifacts/15m-sltp-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --preflight
+dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --preflight
 ```
 
 Preflight checks credentials, Hedge mode, available USDT, open positions and open
@@ -51,7 +71,8 @@ concurrently. The new version locks its state file, but older versions do not.
 Then run from the repository root:
 
 ```powershell
-dotnet artifacts/15m-sltp-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development
+$env:Api__Key = "your-local-monitoring-key"
+dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development
 ```
 
 Look for `LIVE READY` in Seq (or console if Seq is not configured). Entries wait
@@ -61,6 +82,11 @@ worker confirms the position and full-quantity SL/TP orders on BingX.
 
 ## Recovery And Limits
 
+- Market-data history failures remain pending and retry every `BingX:SymbolRetrySeconds`
+  (default 60 seconds), even while the WebSocket is healthy. Once all three history
+  timeframes load, the symbol is subscribed on the existing connection. Only pending
+  symbols are retried; active symbols keep receiving candles. Reconnect backfills
+  still replay missed protection candles without opening entries from that history.
 - Keep `src/TradingBot.Worker/data/live-state.json` across builds and restarts.
   Do not delete it to bypass a halt. Use the same content root on every launch.
 - Attached SL/TP is requested on the exchange with each entry. Recovery validates
@@ -73,7 +99,7 @@ worker confirms the position and full-quantity SL/TP orders on BingX.
   order. Reconcile that ID and any remaining position/protective orders before
   correcting the saved state. Recovery of an uncertain request is manual.
 - Native SL/TP executes on the exchange and closures are detected on subsequent
-  fresh 15m updates. The worker does not send time-based closing orders.
+  fresh 5m updates. The worker does not send time-based closing orders.
   Orphan orders block reuse of their symbol; the bot never cancels unknown orders.
 - Live entries have no daily loss limit or aggregate risk cutoff. Several positions
   can lose together. Available margin and exchange SL/TP checks remain active.
@@ -94,21 +120,22 @@ trade is required by the commands above.
 
 Paper stores current positions in open_positions and closed results/features in
 closed_trades (PostgreSQL; SQLite uses OpenPositions/ClosedTrades). The current
-paper feature names are legacy. From the 2026-10-21 migration, Rsi5m stores
-the entry 15m input, Rsi15m stores the medium 30m input, and Rsi1h stores the
+paper feature names are legacy. From the 2026-10-30 migration, Rsi5m stores
+the entry 5m input, Rsi15m stores the medium 30m input, and Rsi1h stores the
 higher 1h input. ATR/EMA/volume/body columns with a 5m suffix also describe the
-15m entry input. Schema is preserved; do not combine older/newer trades without
-checking their dates and strategy context.
+5m entry input. The 2026-10-21 build used 15m entries with the same column names.
+Schema is preserved; do not combine older/newer trades without checking the
+running build, trade dates and strategy context.
 
 Live writes a separate append-only live_trade_events table in the configured
 persistence provider. Event IDs deduplicate writes across restarts. The journal
-contains entry_requested (schema version 2, explicit 15m/30m/1h timeframe labels,
+contains entry_requested (schema version 2, explicit 5m/30m/1h timeframe labels,
 client ID, signal, reason, EntryCandles/MediumTrendCandles/HigherTrendCandles snapshots,
 strategy/live settings, contract minimums, balance, quantity, leverage, SL/TP),
 entry_response (raw exchange receipt, reported price), entry_protected,
 closed_observed and
 exchange_position_history for detected closures including exchange SL/TP exits. Older journal records may still contain
-schema version 1 or TIME_EXIT events; they are retained as history.
+schema version 1, 15m entry labels or TIME_EXIT events; they are retained as history.
 
 entry_requested is an intent, not proof of a fill. closed_observed uses detection
 time, not actual fill time. Native closure reasons, fees and PnL must be read
@@ -126,19 +153,19 @@ pending-order checks. Keep the state file as well as the DB.
 Inspect journal counts without starting the trading worker:
 
 ```powershell
-dotnet artifacts/15m-sltp-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --journal-status
+dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --journal-status
 ```
 
 Export live events as JSONL without starting the worker:
 
 ```powershell
-dotnet artifacts/15m-sltp-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --export-live-journal
+dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --export-live-journal
 ```
 
 Export one row per paper trade and one row per live trade for analysis:
 
 ```powershell
-dotnet artifacts/analysis-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --export-trade-analysis
+dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --export-trade-analysis
 ```
 
 The command reads the configured DB and writes two JSONL files under `exports`.

@@ -22,7 +22,8 @@ public sealed class LiveTradingEngineTests : IDisposable
     private LiveTradingEngine Create()
     {
         Directory.CreateDirectory(_directory);
-        return new LiveTradingEngine(_candles, Options.Create(new StrategyOptions { RsiOverbought = 101m }),
+        // Keep these synthetic, distant retests focused on execution/sizing; entry filters have their own tests.
+        return new LiveTradingEngine(_candles, Options.Create(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }),
             Options.Create(new RiskOptions { RiskPerTradePercent = 10m }),
             Options.Create(new LiveOptions { Enabled = true, AutoLeverage = _autoLeverage, MaxLeverage = 10,
                 MaxOpenPositions = _positionLimit, MaxMarginUsagePercent = _marginUsage,
@@ -38,7 +39,7 @@ public sealed class LiveTradingEngineTests : IDisposable
     [InlineData("10", false, 1, true, "0.06", 20, 3, "0.15")]
     [InlineData("10", false, 0, true, "0.20", 20, 0, "0")]
     [InlineData("10", false, 1, true, "0.01", 2, 2, "0.15")]
-    [InlineData("100", false, 1, true, "0.01", 20, 3, "1.57")]
+    [InlineData("100", false, 1, true, "0.01", 20, 3, "1.54")]
     [InlineData("0.1", false, 0, true, "0.01", 20, 0, "0")]
     [InlineData("10", false, 1, false, "0.01", 20, 5, "0.15", "BTC-USDT", 2)]
     [InlineData("0", false, 0, false, "0.01", 20, 0, "0", "BTC-USDT", 2)]
@@ -61,12 +62,12 @@ public sealed class LiveTradingEngineTests : IDisposable
         {
             var open = close;
             close += i % 3 == 2 ? -0.6m : 0.5m;
-            var time = end.AddMinutes(-15 * (80 - i));
+            var time = end.AddMinutes(-5 * (80 - i));
             var candle = i == 79
                 ? new Candle(end.AddMinutes(-1), end, 129m, 131m, 129m, 130m, 200m, true)
-                : new Candle(time, time.AddMinutes(15), open, Math.Max(open, close) + 0.5m,
+                : new Candle(time, time.AddMinutes(5), open, Math.Max(open, close) + 0.5m,
                     Math.Min(open, close) - 0.5m, close, 100m, true);
-            _candles.Upsert("SOL-USDT", TimeFrame.FifteenMinutes, candle);
+            _candles.Upsert("SOL-USDT", TimeFrame.FiveMinutes, candle);
             foreach (var frame in new[] { TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
             {
                 var trend = 100m + i * 2m;
@@ -85,16 +86,26 @@ public sealed class LiveTradingEngineTests : IDisposable
         using (var engine = Create())
         {
             await engine.InitializeAsync(default);
-            await engine.ProcessAsync(new MarketUpdate("SOL-USDT", TimeFrame.FifteenMinutes,
-                _candles.Get("SOL-USDT", TimeFrame.FifteenMinutes)[^1]), default);
+            var breakout = _candles.Get("SOL-USDT", TimeFrame.FiveMinutes)[^1];
+            // A newer queued candle must not replace the breakout currently being evaluated.
+            _candles.Upsert("SOL-USDT", TimeFrame.FiveMinutes,
+                new Candle(end, end.AddMinutes(5), 130m, 131m, 1m, 2m, 200m, true));
+            await engine.ProcessAsync(new MarketUpdate("SOL-USDT", TimeFrame.FiveMinutes,
+                breakout), default);
             var retest = new Candle(end, DateTimeOffset.UtcNow, 112m, 132m, 110m, 131m, 100m, true);
-            _candles.Upsert("SOL-USDT", TimeFrame.FifteenMinutes, retest);
-            var update = new MarketUpdate("SOL-USDT", TimeFrame.FifteenMinutes, retest);
-            await engine.ProcessAsync(update with { TimeFrame = TimeFrame.FiveMinutes }, default);
+            _candles.Upsert("SOL-USDT", TimeFrame.FiveMinutes, retest);
+            var update = new MarketUpdate("SOL-USDT", TimeFrame.FiveMinutes, retest);
+            foreach (var frame in new[] { TimeFrame.FifteenMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
+                await engine.ProcessAsync(update with { TimeFrame = frame }, default);
+            await engine.ProcessAsync(update with { Candle = retest with { IsClosed = false } }, default);
+            await engine.ProcessAsync(update with { IsReconciliation = true }, default);
+            await engine.ProcessAsync(update with { Candle = retest with { CloseTime = DateTimeOffset.UtcNow.AddMinutes(-3) } }, default);
+            await engine.ProcessAsync(update with { Candle = retest with { CloseTime = DateTimeOffset.UtcNow.AddMinutes(5) } }, default);
             Assert.Equal(0, _executor.OpenOrdersSent);
             if (timeout) await Assert.ThrowsAsync<TimeoutException>(() => engine.ProcessAsync(update, default));
             else await engine.ProcessAsync(update, default);
             await engine.ProcessAsync(update, default);
+            Assert.Equal(!timeout, engine.IsReady);
             Assert.Equal(expectedOrders, _executor.OpenOrdersSent);
             Assert.Equal(expectedLeverage, _executor.LastLeverage);
             Assert.Equal(decimal.Parse(expectedQuantity, System.Globalization.CultureInfo.InvariantCulture), _executor.LastQuantity);
@@ -104,9 +115,20 @@ public sealed class LiveTradingEngineTests : IDisposable
                 using var context = JsonDocument.Parse(request.PayloadJson);
                 Assert.Equal(expectedLeverage, context.RootElement.GetProperty("Leverage").GetDecimal());
                 Assert.Equal(81, context.RootElement.GetProperty("EntryCandles").GetArrayLength());
-                Assert.Equal("15m", context.RootElement.GetProperty("EntryTimeFrame").GetString());
+                Assert.Equal("5m", context.RootElement.GetProperty("EntryTimeFrame").GetString());
                 Assert.Equal("30m", context.RootElement.GetProperty("MediumTrendTimeFrame").GetString());
                 Assert.Equal("1h", context.RootElement.GetProperty("HigherTrendTimeFrame").GetString());
+                var signalTime = context.RootElement.GetProperty("Signal").GetProperty("Time").GetDateTimeOffset();
+                foreach (var property in new[] { "EntryCandles", "MediumTrendCandles", "HigherTrendCandles" })
+                    Assert.All(context.RootElement.GetProperty(property).EnumerateArray(), candle =>
+                        Assert.True(candle.GetProperty("CloseTime").GetDateTimeOffset() <= signalTime));
+                var payload = context.RootElement;
+                var estimatedLoss = payload.GetProperty("Quantity").GetDecimal() *
+                    (payload.GetProperty("StopDistance").GetDecimal() +
+                     (payload.GetProperty("Signal").GetProperty("EntryPrice").GetDecimal() +
+                      payload.GetProperty("StopLoss").GetDecimal()) * 0.0005m);
+                Assert.True(estimatedLoss <= payload.GetProperty("RiskBudget").GetDecimal());
+                Assert.Equal(estimatedLoss, payload.GetProperty("EstimatedLossAtStop").GetDecimal());
                 Assert.Equal(timeout ? 1 : 3, _journal.Events.Count);
             }
         }
@@ -157,8 +179,8 @@ public sealed class LiveTradingEngineTests : IDisposable
         using var engine = Create();
         await engine.InitializeAsync(default);
         var now = DateTimeOffset.UtcNow;
-        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes,
-            new Candle(now.AddMinutes(-15), now, 100m, 101m, 99m, 100m, 1m, true)), default);
+        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes,
+            new Candle(now.AddMinutes(-5), now, 100m, 101m, 99m, 100m, 1m, true)), default);
         Assert.Equal(0, _executor.Writes);
     }
 
@@ -285,9 +307,9 @@ public sealed class LiveTradingEngineTests : IDisposable
         _executor.BotSymbols.Add("SOL-USDT");
         await engine.InitializeAsync(default);
         var now = DateTimeOffset.UtcNow;
-        var candle = new Candle(now.AddMinutes(-15), now, 100m, 101m, 99m, 100m, 1m, true);
+        var candle = new Candle(now.AddMinutes(-5), now, 100m, 101m, 99m, 100m, 1m, true);
 
-        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes, candle), default);
+        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes, candle), default);
 
         var state = JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(Path.Combine(_directory, "state.json")))!;
         Assert.Single(state.Positions);
@@ -296,7 +318,7 @@ public sealed class LiveTradingEngineTests : IDisposable
         Assert.DoesNotContain(_journal.Events.Values, entry => entry.Kind == "close_requested");
 
         _executor.BotSymbols.Remove("SOL-USDT");
-        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes,
+        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes,
             candle with { OpenTime = candle.OpenTime.AddSeconds(1) }), default);
 
         state = JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(Path.Combine(_directory, "state.json")))!;
@@ -318,13 +340,13 @@ public sealed class LiveTradingEngineTests : IDisposable
         _executor.Positions = 0; // Exchange SL/TP closed the position.
         _executor.HistoryUnavailable = true;
         var now = DateTimeOffset.UtcNow;
-        var candle = new Candle(now.AddMinutes(-15), now, 100, 101, 99, 100, 1, true);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes, candle), default));
+        var candle = new Candle(now.AddMinutes(-5), now, 100, 101, 99, 100, 1, true);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes, candle), default));
         var state = JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(Path.Combine(_directory, "state.json")))!;
         Assert.Null(state.PendingOrder);
         Assert.Single(state.Positions);
         _executor.HistoryUnavailable = false;
-        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes, candle with { OpenTime = candle.OpenTime.AddSeconds(1) }), default);
+        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes, candle with { OpenTime = candle.OpenTime.AddSeconds(1) }), default);
         Assert.Equal(0, _executor.Writes);
         Assert.Single(_journal.Events.Values.Where(e => e.Kind == "closed_observed"));
         Assert.Single(_journal.Events.Values.Where(e => e.Kind == "exchange_position_history"));
@@ -354,10 +376,10 @@ public sealed class LiveTradingEngineTests : IDisposable
             {
                 var open = close;
                 close += i % 3 == 2 ? -0.6m : 0.5m;
-                var time = end.AddMinutes(-15 * (80 - i));
-                _candles.Upsert(symbol, TimeFrame.FifteenMinutes, i == 79
+                var time = end.AddMinutes(-5 * (80 - i));
+                _candles.Upsert(symbol, TimeFrame.FiveMinutes, i == 79
                     ? new Candle(end.AddMinutes(-1), end, 129m, 131m, 129m, 130m, 200m, true)
-                    : new Candle(time, time.AddMinutes(15), open, Math.Max(open, close) + 0.5m,
+                    : new Candle(time, time.AddMinutes(5), open, Math.Max(open, close) + 0.5m,
                         Math.Min(open, close) - 0.5m, close, 100m, true));
                 foreach (var frame in new[] { TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
                 {
@@ -373,13 +395,13 @@ public sealed class LiveTradingEngineTests : IDisposable
         {
             await engine.InitializeAsync(default);
             foreach (var symbol in new[] { "SOL-USDT", "ETH-USDT" })
-                await engine.ProcessAsync(new(symbol, TimeFrame.FifteenMinutes, _candles.Get(symbol, TimeFrame.FifteenMinutes)[^1]), default);
+                await engine.ProcessAsync(new(symbol, TimeFrame.FiveMinutes, _candles.Get(symbol, TimeFrame.FiveMinutes)[^1]), default);
             foreach (var symbol in new[] { "SOL-USDT", "ETH-USDT" })
             {
                 _executor.TimeoutOnOpen = timeoutSecond && symbol == "ETH-USDT";
                 var retest = new Candle(end, DateTimeOffset.UtcNow, 112m, 132m, 110m, 131m, 100m, true);
-                _candles.Upsert(symbol, TimeFrame.FifteenMinutes, retest);
-                var update = new MarketUpdate(symbol, TimeFrame.FifteenMinutes, retest);
+                _candles.Upsert(symbol, TimeFrame.FiveMinutes, retest);
+                var update = new MarketUpdate(symbol, TimeFrame.FiveMinutes, retest);
                 if (_executor.TimeoutOnOpen) await Assert.ThrowsAsync<TimeoutException>(() => engine.ProcessAsync(update, default));
                 else await engine.ProcessAsync(update, default);
                 await engine.ProcessAsync(update, default);
@@ -422,8 +444,8 @@ public sealed class LiveTradingEngineTests : IDisposable
             {
                 _executor.BotSymbols.Remove(held.Symbol);
                 var now = DateTimeOffset.UtcNow;
-                await restarted.ProcessAsync(new(held.Symbol, TimeFrame.FifteenMinutes,
-                    new Candle(now.AddMinutes(-15), now, 100, 101, 99, 100, 1, true)), default);
+                await restarted.ProcessAsync(new(held.Symbol, TimeFrame.FiveMinutes,
+                    new Candle(now.AddMinutes(-5), now, 100, 101, 99, 100, 1, true)), default);
                 var remaining = JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(path))!;
                 Assert.DoesNotContain(remaining.Positions, p => p.Symbol == held.Symbol);
                 Assert.Equal(_executor.BotSymbols.Count, remaining.Positions.Count);
@@ -449,8 +471,8 @@ public sealed class LiveTradingEngineTests : IDisposable
         await engine.InitializeAsync(default);
         _executor.BotSymbols.Remove("SOL-USDT"); // Exchange SL/TP closure.
         var now = DateTimeOffset.UtcNow;
-        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FifteenMinutes,
-            new Candle(now.AddMinutes(-15), now, 100, 101, 99, 100, 1, true)), default);
+        await engine.ProcessAsync(new("SOL-USDT", TimeFrame.FiveMinutes,
+            new Candle(now.AddMinutes(-5), now, 100, 101, 99, 100, 1, true)), default);
         var state = JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(Path.Combine(_directory, "state.json")))!;
         Assert.Equal("ETH-USDT", Assert.Single(state.Positions).Symbol);
         Assert.Equal("ETH-USDT", Assert.Single(_executor.BotSymbols));

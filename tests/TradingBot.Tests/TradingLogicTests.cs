@@ -20,7 +20,8 @@ public sealed class TradingLogicTests
             VolumeLookback = 20,
             VolumeMultiplier = 1.2m,
             AtrPeriod = 14,
-            RsiOverbought = 101m, RsiOversold = -1m
+            RsiOverbought = 101m, RsiOversold = -1m,
+            MaxRetestEntryDistanceAtr = 0m // Synthetic distant retests here isolate the older directional/quality gates.
         }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
@@ -61,7 +62,8 @@ public sealed class TradingLogicTests
         var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions
         {
             MaximumVolumeMultiplier = 3m,
-            RsiOverbought = 101m
+            RsiOverbought = 101m,
+            MaxRetestEntryDistanceAtr = 0m
         }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 400m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
@@ -77,7 +79,7 @@ public sealed class TradingLogicTests
     [Fact]
     public void Strategy_RejectsWeakRetest()
     {
-        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m }));
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
         var oneHour = BuildCandles(80, TimeSpan.FromHours(1), 100m, 2m, 100m, 258m, 100m);
@@ -98,7 +100,8 @@ public sealed class TradingLogicTests
         var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions
         {
             ExcludedSymbols = ["BTC-USDT"],
-            RsiOverbought = 101m
+            RsiOverbought = 101m,
+            MaxRetestEntryDistanceAtr = 0m
         }));
         var fiveMinute = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var fifteenMinute = BuildCandles(80, TimeSpan.FromMinutes(15), 100m, 1m, 100m, 179m, 100m);
@@ -119,7 +122,7 @@ public sealed class TradingLogicTests
     [InlineData("same-breakout-candle")]
     public void Strategy_RejectsRetestWithoutConfirmedDirectionalContext(string scenario)
     {
-        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m }));
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }));
         var entry = BuildOscillatingCandles(80, TimeSpan.FromMinutes(5), 100m, 100m, 130m, 200m).ToList();
         var medium = BuildCandles(80, TimeSpan.FromHours(1), 100m, 1m, 100m, 179m, 100m).ToList();
         var higher = BuildCandles(80, TimeSpan.FromHours(4), 100m, 2m, 100m, 258m, 100m).ToList();

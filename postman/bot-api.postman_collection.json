@@ -1,0 +1,56 @@
+{
+  "info": {
+    "name": "BingX bot monitoring - API-only smoke",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Run against the real HTTP host with Bot__Enabled=false. Contract: bot-api-contract.md. All requests are read-only; no exchange calls."
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:5087" },
+    { "key": "apiKey", "value": "local-api-smoke-key" }
+  ],
+  "item": [
+    {
+      "name": "HTTP liveness",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health/live" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Host responds', () => pm.response.to.have.status(200));",
+        "pm.test('Liveness is healthy', () => pm.expect(pm.response.text()).to.eql('Healthy'));"
+      ] }}]
+    },
+    {
+      "name": "Disabled bot is not ready",
+      "request": { "method": "GET", "url": "{{baseUrl}}/health/ready" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Disabled bot returns 503', () => pm.response.to.have.status(503));",
+        "pm.test('Readiness is unhealthy', () => pm.expect(pm.response.text()).to.eql('Unhealthy'));"
+      ] }}]
+    },
+    {
+      "name": "Missing API key",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/bot/status" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('No key returns 401', () => pm.response.to.have.status(401));"
+      ] }}]
+    },
+    {
+      "name": "Wrong API key",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/bot/status", "header": [{ "key": "X-Api-Key", "value": "wrong" }] },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Wrong key returns 401', () => pm.response.to.have.status(401));"
+      ] }}]
+    },
+    {
+      "name": "Authorized bot status",
+      "request": { "method": "GET", "url": "{{baseUrl}}/api/bot/status", "header": [{ "key": "X-Api-Key", "value": "{{apiKey}}" }] },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+        "pm.test('Status returns 200', () => pm.response.to.have.status(200));",
+        "const status = pm.response.json();",
+        "pm.test('Bot and live trading stay disabled', () => { pm.expect(status.enabled).to.eql(false); pm.expect(status.liveTradingEnabled).to.eql(false); });",
+        "pm.test('No worker was initialized', () => { pm.expect(status.processing.initialized).to.eql(false); pm.expect(status.processing.processedUpdates).to.eql(0); });",
+        "pm.test('Timeframes stay 5m/30m/1h', () => { pm.expect(status.entryTimeFrame).to.eql('5m'); pm.expect(status.trendTimeFrames).to.eql(['30m', '1h']); });",
+        "pm.test('Status cannot be cached', () => pm.expect(pm.response.headers.get('Cache-Control')).to.eql('no-store'));",
+        "pm.test('API key is never returned', () => pm.expect(pm.response.text()).not.to.include(pm.variables.get('apiKey')));"
+      ] }}]
+    }
+  ]
+}

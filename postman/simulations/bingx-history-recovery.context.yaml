@@ -1,0 +1,23 @@
+purpose:
+  stands_in_for: BingX public contract and kline HTTP responses used by the market-data worker.
+  unblocks: Local verification of 5m/30m/1h history loading and pending-symbol recovery without a trading engine or exchange credentials.
+assumptions:
+  - id: native-history-intervals
+    status: supported
+    claim: Against this stand-in, the production REST client and worker request only 5m/30m/1h history and retain closed candles with each interval's duration.
+    reason: The smoke checked the mock request counters and the resulting candle store for both symbols, including absence of 15m requests and history. This establishes caller behavior against the modeled responses, not current BingX availability.
+    verification: On 2026-10-30, ran TradingBot.SimulationSmoke in Release against the local Postman simulation on port 4907. All interval and candle-duration assertions passed; simulation request events confirmed the three native intervals. Fingerprint timeframe-5m-dirty includes uncommitted changes.
+    source: tests/TradingBot.SimulationSmoke/Program.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXRestClient.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXMarketDataWorker.cs; postman/mocks/bingx-history-recovery/default.js
+    updated_at: "2026-10-30"
+  - id: history-recovery-on-healthy-stream
+    status: supported
+    claim: In the modeled HTTP-200/code-100410 scenario, BTC history recovers after two failures while ETH continues on one stream connection without reloading its history.
+    reason: Mock counters and caller assertions agree; the stream in this smoke is a test implementation. The separate BingXWebSocketSubscriptionTests exercises the real WebSocket client locally, including 5m/30m/1h subscription and heartbeat behavior.
+    verification: On 2026-10-30, the smoke observed three BTC loads, one ETH load, two modeled failures and 17 ETH candles on one connection. All 100 unit/integration tests passed, including the local WebSocket subscription test. No real exchange call or order was made by these checks. Fingerprint timeframe-5m-dirty includes uncommitted changes.
+    source: tests/TradingBot.SimulationSmoke/Program.cs; tests/TradingBot.Tests/BingXWebSocketSubscriptionTests.cs; postman/mocks/bingx-history-recovery/default.js
+    updated_at: "2026-10-30"
+fingerprints:
+  - id: timeframe-5m-dirty
+    date: "2026-10-30"
+    commit: 75923a5be163865d748edd5ec9f9066fe045f15f
+    cli: "1.73.0"

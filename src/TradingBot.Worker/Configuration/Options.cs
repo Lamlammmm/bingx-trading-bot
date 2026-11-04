@@ -1,5 +1,11 @@
 namespace TradingBot.Worker.Configuration;
 
+public sealed class BotOptions
+{
+    public const string SectionName = "Bot";
+    public bool Enabled { get; set; } = true;
+}
+
 public sealed class BingXOptions
 {
     public const string SectionName = "BingX";
@@ -11,6 +17,7 @@ public sealed class BingXOptions
     public int HistoryLimit { get; set; } = 250;
     public int RequestTimeoutSeconds { get; set; } = 20;
     public int ReconnectDelaySeconds { get; set; } = 5;
+    public int SymbolRetrySeconds { get; set; } = 60;
     public bool LogRawPriceUpdates { get; set; }
 }
 
@@ -30,6 +37,8 @@ public sealed class StrategyOptions
     public decimal MinimumBodyRatio { get; set; } = 0.5m;
     public int SignalCooldownBars { get; set; } = 12;
     public int RetestConfirmationBars { get; set; } = 3;
+    // Distance from the broken level to the retest close, using ATR before breakout. Zero disables this filter.
+    public decimal MaxRetestEntryDistanceAtr { get; set; } = 1m;
     public List<string> ExcludedSymbols { get; set; } = new();
 }
 

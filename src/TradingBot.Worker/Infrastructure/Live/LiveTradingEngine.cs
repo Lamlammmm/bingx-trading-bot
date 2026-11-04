@@ -24,6 +24,8 @@ public sealed class LiveTradingEngine : IDisposable
     private FileStream? _stateLock;
     private bool _initialized;
 
+    public bool IsReady => !_options.Enabled || (_initialized && _state.PendingOrder is null);
+
     public sealed record SavedPosition(string Symbol, TradeDirection Direction, decimal Quantity,
         decimal StopLoss, decimal TakeProfit, DateTimeOffset OpenedAt, string? TradeId = null,
         string? RequestedExitReason = null);
@@ -94,7 +96,7 @@ public sealed class LiveTradingEngine : IDisposable
         await _executor.ValidatePositionModeAsync(cancellationToken);
         await ReconcileAsync(cancellationToken);
         _initialized = true;
-        _logger.LogWarning("LIVE READY | entry=15m | trends=30m/1h | exits=SL/TP only | riskPerTrade={RiskPerTrade}% | leverage={Leverage} | autoLeverage={AutoLeverage} | maxLeverage={MaxLeverage} | restoredPositions={PositionCount} | positionLimit={PositionLimit} | state={Path}",
+        _logger.LogWarning("LIVE READY | entry=5m | trends=30m/1h | exits=SL/TP only | riskPerTrade={RiskPerTrade}% | leverage={Leverage} | autoLeverage={AutoLeverage} | maxLeverage={MaxLeverage} | restoredPositions={PositionCount} | positionLimit={PositionLimit} | state={Path}",
             _riskOptions.RiskPerTradePercent, _options.Leverage, _options.AutoLeverage, _options.MaxLeverage, _state.Positions.Count, _options.MaxOpenPositions, path);
     }
 
@@ -137,7 +139,7 @@ public sealed class LiveTradingEngine : IDisposable
         if (!_options.Enabled) return;
         if (!_initialized) throw new InvalidOperationException("Live initialization has not completed.");
         if (_state.PendingOrder is not null) return;
-        if (update.TimeFrame != TimeFrame.FifteenMinutes || !update.Candle.IsClosed || update.IsReconciliation) return;
+        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed || update.IsReconciliation) return;
         if (DateTimeOffset.UtcNow - update.Candle.CloseTime > TimeSpan.FromMinutes(2)) return;
         if (update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10)) return;
         if (_lastProcessed.TryGetValue(update.Symbol, out var last) && update.Candle.OpenTime <= last) return;
@@ -146,8 +148,14 @@ public sealed class LiveTradingEngine : IDisposable
         await ReconcileAsync(cancellationToken, update.Symbol);
         if (_state.Positions.Any(p => string.Equals(p.Symbol, update.Symbol, StringComparison.OrdinalIgnoreCase))) return;
         if (_options.MaxOpenPositions > 0 && _state.Positions.Count >= _options.MaxOpenPositions) return;
-        var signal = _strategy.Evaluate(update.Symbol, _candles.Get(update.Symbol, TimeFrame.FifteenMinutes),
-            _candles.Get(update.Symbol, TimeFrame.ThirtyMinutes), _candles.Get(update.Symbol, TimeFrame.OneHour));
+        // The shared store may already contain newer queued bars. Evaluate and journal only this candle's context.
+        var entryCandles = _candles.Get(update.Symbol, TimeFrame.FiveMinutes)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var mediumTrendCandles = _candles.Get(update.Symbol, TimeFrame.ThirtyMinutes)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var higherTrendCandles = _candles.Get(update.Symbol, TimeFrame.OneHour)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var signal = _strategy.Evaluate(update.Symbol, entryCandles, mediumTrendCandles, higherTrendCandles);
         if (signal is null) return;
         var contract = _contracts.Get(update.Symbol);
         if (contract is null || !contract.IsActive || signal.EntryPrice <= 0m || signal.Atr <= 0m) return;
@@ -169,7 +177,8 @@ public sealed class LiveTradingEngine : IDisposable
 
         var marginBudget = balance * _options.MaxMarginUsagePercent / 100m;
         var riskBudget = balance * _riskOptions.RiskPerTradePercent / 100m;
-        var riskQuantity = riskBudget / distance;
+        var lossPerUnitAtStop = distance + (signal.EntryPrice + stop) * _riskOptions.FeeRate;
+        var riskQuantity = riskBudget / lossPerUnitAtStop;
         var leverage = _options.AutoLeverage
             ? Math.Max(1m, decimal.Ceiling(riskQuantity * signal.EntryPrice / marginBudget))
             : _options.Leverage;
@@ -204,14 +213,15 @@ public sealed class LiveTradingEngine : IDisposable
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":requested", entryId, update.Symbol,
             "entry_requested", DateTimeOffset.UtcNow, JsonSerializer.Serialize(new
             {
-                SchemaVersion = 2, EntryTimeFrame = "15m", MediumTrendTimeFrame = "30m", HigherTrendTimeFrame = "1h",
+                SchemaVersion = 2, EntryTimeFrame = "5m", MediumTrendTimeFrame = "30m", HigherTrendTimeFrame = "1h",
                 Signal = signal, Quantity = quantity, Leverage = leverage,
                 AvailableBalance = balance, MarginBudget = marginBudget, EstimatedCostsPerUnit = estimatedCostsPerUnit, RiskBudget = riskBudget, StopDistance = distance,
+                EstimatedLossAtStop = quantity * lossPerUnitAtStop,
                 StopLoss = stop, TakeProfit = take,
                 Contract = contract, Strategy = _strategyOptions, Live = _options,
-                EntryCandles = _candles.Get(update.Symbol, TimeFrame.FifteenMinutes),
-                MediumTrendCandles = _candles.Get(update.Symbol, TimeFrame.ThirtyMinutes),
-                HigherTrendCandles = _candles.Get(update.Symbol, TimeFrame.OneHour)
+                EntryCandles = entryCandles,
+                MediumTrendCandles = mediumTrendCandles,
+                HigherTrendCandles = higherTrendCandles
             })));
         await SaveAsync(cancellationToken);
         var entryPrice = await _executor.OpenMarketPositionAsync(update.Symbol, signal.Direction, quantity, stop, take,

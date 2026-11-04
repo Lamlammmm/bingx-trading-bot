@@ -10,9 +10,45 @@ namespace TradingBot.Tests;
 public sealed class PaperTradingEngineTests
 {
     [Theory]
-    [InlineData(true)]
     [InlineData(false)]
-    public async Task EntriesUse15mWith30mAnd1hTrendsWhile5mOnlyMonitorsProtection(bool protectionArrivesFirst)
+    [InlineData(true)]
+    public async Task EntryContextExcludesFormingAndLaterQueuedCandles(bool useAi)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var candles = new InMemoryCandleStore();
+        var strategy = new CapturingStrategy();
+        var analyzer = new CapturingAnalyzer();
+        var engine = new PaperTradingEngine(candles, strategy, new RiskManager(Options.Create(new RiskOptions())),
+            useAi ? analyzer : new DisabledAnalyzer(), new CapturingTradeStore(), new InMemoryContractStore(),
+            Options.Create(new RiskOptions()), Options.Create(new PaperTradingOptions()), Options.Create(new OpenAIOptions()),
+            Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance);
+        await engine.InitializeAsync(default);
+        foreach (var frame in new[] { TimeFrame.FiveMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
+        {
+            var minutes = frame == TimeFrame.FiveMinutes ? 5 : frame == TimeFrame.ThirtyMinutes ? 30 : 60;
+            candles.Upsert("BTC-USDT", frame, new Candle(now.AddMinutes(-minutes), now, 99, 101, 98, 100, 10, true));
+            candles.Upsert("BTC-USDT", frame, new Candle(now, now.AddMinutes(minutes), 100, 201, 99, 200, 10, true));
+            candles.Upsert("BTC-USDT", frame, new Candle(now.AddMinutes(-2 * minutes), now.AddMinutes(-minutes), 99, 100, 98, 99, 10, false));
+        }
+
+        await engine.ProcessAsync(new("BTC-USDT", TimeFrame.FiveMinutes,
+            new Candle(now.AddMinutes(-5), now, 99, 101, 98, 100, 10, true)), default);
+
+        Assert.Equal(now, Assert.Single(strategy.Entry).CloseTime);
+        Assert.Equal(now, Assert.Single(strategy.Medium).CloseTime);
+        Assert.Equal(now, Assert.Single(strategy.Higher).CloseTime);
+        if (useAi)
+        {
+            Assert.NotNull(analyzer.Context);
+            Assert.Same(strategy.Entry, analyzer.Context.EntryCandles);
+            Assert.Same(strategy.Medium, analyzer.Context.MediumTrendCandles);
+            Assert.Same(strategy.Higher, analyzer.Context.HigherTrendCandles);
+        }
+        else Assert.Null(analyzer.Context);
+    }
+
+    [Fact]
+    public async Task EntriesUse5mWith30mAnd1hTrendsAndLater5mBarsMonitorProtection()
     {
         var now = DateTimeOffset.UtcNow;
         var strategy = new CapturingStrategy();
@@ -25,9 +61,8 @@ public sealed class PaperTradingEngineTests
             new DisabledAnalyzer(), store, contracts, risk, Options.Create(new PaperTradingOptions { SlippageBasisPoints = 0m }),
             Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance);
         await engine.InitializeAsync(default);
-        var oldProtection = new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
-            new Candle(now.AddMinutes(-5), now, 100m, 120m, 80m, 100m, 10m, true));
-        if (protectionArrivesFirst) await engine.ProcessAsync(oldProtection, default);
+        await engine.ProcessAsync(new("BTC-USDT", TimeFrame.FifteenMinutes,
+            new Candle(now.AddMinutes(-15), now, 100m, 120m, 80m, 100m, 10m, true)), default);
         await engine.ProcessAsync(new("BTC-USDT", TimeFrame.ThirtyMinutes,
             new Candle(now.AddMinutes(-30), now, 104m, 106m, 103m, 105m, 10m, true)), default);
         await engine.ProcessAsync(new("BTC-USDT", TimeFrame.OneHour,
@@ -35,13 +70,14 @@ public sealed class PaperTradingEngineTests
         Assert.Equal(0, strategy.Calls);
         Assert.Empty(store.Positions);
 
-        var entry = new MarketUpdate("BTC-USDT", TimeFrame.FifteenMinutes,
-            new Candle(now.AddMinutes(-15), now, 99m, 101m, 98m, 100m, 10m, true));
+        var entry = new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
+            new Candle(now.AddMinutes(-5), now, 99m, 120m, 80m, 100m, 10m, true));
         await engine.ProcessAsync(entry with { Candle = entry.Candle with { IsClosed = false } }, default);
         Assert.Equal(0, strategy.Calls);
         await engine.ProcessAsync(entry, default);
         await engine.ProcessAsync(entry, default);
-        if (!protectionArrivesFirst) await engine.ProcessAsync(oldProtection, default);
+        await engine.ProcessAsync(entry with { Candle = entry.Candle with {
+            OpenTime = now.AddMinutes(-10), CloseTime = now.AddMinutes(-5) } }, default);
         Assert.Equal(1, strategy.Calls);
         Assert.Equal(100m, Assert.Single(strategy.Entry).Close);
         Assert.Equal(105m, Assert.Single(strategy.Medium).Close);
@@ -56,6 +92,40 @@ public sealed class PaperTradingEngineTests
             OpenTime = now, CloseTime = now.AddMinutes(15) } }, default);
         Assert.Empty(store.Positions);
         Assert.Equal(1, strategy.Calls); // No new entry on the candle that closed the previous position.
+    }
+
+    [Fact]
+    public async Task AiReceives5mEntryCandlesWith30mAnd1hTrendsOnlyOnFreshClosed5mBars()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var analyzer = new CapturingAnalyzer();
+        var strategy = new CapturingStrategy();
+        var engine = new PaperTradingEngine(new InMemoryCandleStore(), strategy,
+            new RiskManager(Options.Create(new RiskOptions())), analyzer, new CapturingTradeStore(),
+            new InMemoryContractStore(), Options.Create(new RiskOptions()), Options.Create(new PaperTradingOptions()),
+            Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance);
+        await engine.InitializeAsync(default);
+        foreach (var frame in new[] { TimeFrame.FifteenMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
+        {
+            var minutes = frame == TimeFrame.FifteenMinutes ? 15 : frame == TimeFrame.ThirtyMinutes ? 30 : 60;
+            await engine.ProcessAsync(new("BTC-USDT", frame,
+                new Candle(now.AddMinutes(-minutes), now, 100m, 102m, 99m, 101m, 10m, true)), default);
+        }
+        Assert.Null(analyzer.Context);
+        var entry = new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
+            new Candle(now.AddMinutes(-5), now, 99m, 101m, 98m, 100m, 10m, true));
+        await engine.ProcessAsync(entry with { Candle = entry.Candle with { IsClosed = false } }, default);
+        Assert.Null(analyzer.Context);
+        await engine.ProcessAsync(entry with { IsReconciliation = true }, default);
+        Assert.Null(analyzer.Context);
+        Assert.Equal(0, strategy.Calls);
+        await engine.ProcessAsync(entry with { Candle = entry.Candle with {
+            OpenTime = now, CloseTime = now.AddMinutes(5) } }, default);
+        Assert.NotNull(analyzer.Context);
+        Assert.All(analyzer.Context.EntryCandles, candle => Assert.Equal(TimeSpan.FromMinutes(5), candle.CloseTime - candle.OpenTime));
+        Assert.Equal(TimeSpan.FromMinutes(30), Assert.Single(analyzer.Context.MediumTrendCandles).CloseTime - analyzer.Context.MediumTrendCandles[0].OpenTime);
+        Assert.Equal(TimeSpan.FromHours(1), Assert.Single(analyzer.Context.HigherTrendCandles).CloseTime - analyzer.Context.HigherTrendCandles[0].OpenTime);
+        Assert.Equal(1, strategy.Calls);
     }
 
     [Theory]
@@ -105,7 +175,7 @@ public sealed class PaperTradingEngineTests
             NullLogger<PaperTradingEngine>.Instance);
         await engine.InitializeAsync(CancellationToken.None);
 
-        var candle = new Candle(openedAt.AddMinutes(15), openedAt.AddMinutes(30),
+        var candle = new Candle(openedAt.AddMinutes(25), openedAt.AddMinutes(30),
             101m, 102m, 100m, 101m, 10m, true);
         await engine.ProcessAsync(new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes, candle), CancellationToken.None);
 
@@ -144,6 +214,17 @@ public sealed class PaperTradingEngineTests
         public bool Enabled => false;
         public Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken) =>
             Task.FromResult(new AiAnalysisResult(null, "disabled"));
+    }
+
+    private sealed class CapturingAnalyzer : IOpenAiAnalyzer
+    {
+        public bool Enabled => true;
+        public AiAnalysisContext? Context { get; private set; }
+        public Task<AiAnalysisResult> AnalyzeAsync(AiAnalysisContext context, CancellationToken cancellationToken)
+        {
+            Context = context;
+            return Task.FromResult(new AiAnalysisResult(new AiDecision("no_trade", 0m, 0m, 0m, 0m, "test", "test")));
+        }
     }
 
     private sealed class CapturingTradeStore(PaperPosition? position = null) : ITradeStore

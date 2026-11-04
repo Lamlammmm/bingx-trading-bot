@@ -83,7 +83,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
     {
         var symbol = update.Symbol;
         candleStore.Upsert(symbol, update.TimeFrame, update.Candle);
-        if (update.TimeFrame is not (TimeFrame.FiveMinutes or TimeFrame.FifteenMinutes) || !update.Candle.IsClosed) return;
+        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed) return;
         var key = (symbol, update.TimeFrame);
         if (_lastProcessedCandles.TryGetValue(key, out var lastProcessedCandle) && update.Candle.OpenTime <= lastProcessedCandle) return;
         _lastProcessedCandles[key] = update.Candle.OpenTime;
@@ -92,25 +92,30 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         var position = _positionsBySymbol.GetValueOrDefault(symbol);
         if (position is not null)
         {
-            // Five-minute candles only monitor protection; never replay pre-entry prices against a new position.
-            if (update.TimeFrame == TimeFrame.FiveMinutes && update.Candle.CloseTime > position.OpenedAt)
+            // Never replay pre-entry prices against a new position.
+            if (update.Candle.CloseTime > position.OpenedAt)
                 await TryClosePositionAsync(symbol, position, update.Candle, cancellationToken);
             return;
         }
-        if (update.TimeFrame != TimeFrame.FifteenMinutes) return;
         if (_lastPositionExitTimes.TryGetValue(symbol, out var lastExit) && update.Candle.CloseTime <= lastExit) return;
         if (update.IsReconciliation)
         {
-            logger.LogInformation("Skipping new entry on reconciled closed 15m candle for {Symbol} at {OpenTime}",
+            logger.LogInformation("Skipping new entry on reconciled closed 5m candle for {Symbol} at {OpenTime}",
                 symbol, update.Candle.OpenTime);
             return;
         }
 
-        var technicalSignal = strategy.Evaluate(symbol, candleStore.Get(symbol, TimeFrame.FifteenMinutes),
-            candleStore.Get(symbol, TimeFrame.ThirtyMinutes), candleStore.Get(symbol, TimeFrame.OneHour));
+        // Freeze one closed-candle context for strategy, optional AI and persisted entry features.
+        var entryCandles = candleStore.Get(symbol, TimeFrame.FiveMinutes)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var mediumTrendCandles = candleStore.Get(symbol, TimeFrame.ThirtyMinutes)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var higherTrendCandles = candleStore.Get(symbol, TimeFrame.OneHour)
+            .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
+        var technicalSignal = strategy.Evaluate(symbol, entryCandles, mediumTrendCandles, higherTrendCandles);
         var signalText = technicalSignal is null ? "none" : technicalSignal.Direction.ToString();
         logger.LogInformation(RuleNoSignalEvent,
-            "Evaluated closed 15m candle for {Symbol}: open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}, technicalSignal={TechnicalSignal}",
+            "Evaluated closed 5m candle for {Symbol}: open={Open}, high={High}, low={Low}, close={Close}, volume={Volume}, technicalSignal={TechnicalSignal}",
             symbol, update.Candle.Open, update.Candle.High, update.Candle.Low, update.Candle.Close, update.Candle.Volume, signalText);
 
         if (technicalSignal is not null)
@@ -126,8 +131,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         if (openAiAnalyzer.Enabled)
         {
             var result = await openAiAnalyzer.AnalyzeAsync(new AiAnalysisContext(symbol, update.Candle.CloseTime,
-                candleStore.Get(symbol, TimeFrame.FifteenMinutes), candleStore.Get(symbol, TimeFrame.ThirtyMinutes),
-                candleStore.Get(symbol, TimeFrame.OneHour), technicalSignal), cancellationToken);
+                entryCandles, mediumTrendCandles, higherTrendCandles, technicalSignal), cancellationToken);
             signal = BuildAiSignal(result, technicalSignal, update.Candle, symbol);
             if (signal is null) return;
         }
@@ -157,7 +161,8 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         }
 
         _balance -= plan.EntryFee;
-        var entryFeatures = BuildEntryFeatures(symbol, signal with { EntryPrice = plan.EntryPrice });
+        var entryFeatures = BuildEntryFeatures(signal with { EntryPrice = plan.EntryPrice },
+            entryCandles, mediumTrendCandles, higherTrendCandles);
         _positionsBySymbol[symbol] = new PaperPosition(plan.Symbol, plan.Direction, plan.Quantity, plan.EntryPrice, plan.StopLoss,
             plan.TakeProfit, plan.RiskAmount, plan.EntryFee, signal.Time, entryFeatures,
             InitialStopLoss: plan.StopLoss, InitialQuantity: plan.Quantity);
@@ -171,16 +176,14 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         tradeStore.SaveAccountStateAsync(new AccountState(_balance, _balanceDate, _realizedPnlToday,
             _totalWins, _totalLosses, _totalNetPnl), cancellationToken);
 
-    private TradeFeatures BuildEntryFeatures(string symbol, StrategySignal signal)
+    private TradeFeatures BuildEntryFeatures(StrategySignal signal, IReadOnlyList<Candle> entryCandles,
+        IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles)
     {
-        var entryCandles = candleStore.Get(symbol, TimeFrame.FifteenMinutes);
-        var mediumTrendCandles = candleStore.Get(symbol, TimeFrame.ThirtyMinutes);
-        var higherTrendCandles = candleStore.Get(symbol, TimeFrame.OneHour);
         var lastCandle = entryCandles.Count > 0 ? entryCandles[^1] : null;
         var averageVolume = TechnicalIndicators.AverageVolume(entryCandles, _strategyOptions.VolumeLookback);
         var volumeRatio = lastCandle is not null && averageVolume > 0m ? lastCandle.Volume / averageVolume : 0m;
 
-        // Preserve legacy storage names: these now contain entry 15m / medium 30m / higher 1h indicators.
+        // Preserve legacy storage names: these contain entry 5m / medium 30m / higher 1h indicators.
         return new TradeFeatures(
             Rsi5m: TechnicalIndicators.Rsi(entryCandles, _strategyOptions.RsiPeriod),
             Rsi15m: TechnicalIndicators.Rsi(mediumTrendCandles, _strategyOptions.RsiPeriod),
@@ -248,7 +251,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             return null;
         }
 
-        var atr = technicalSignal?.Atr ?? TechnicalIndicators.Atr(candleStore.Get(symbol, TimeFrame.FifteenMinutes), _strategyOptions.AtrPeriod);
+        var atr = technicalSignal?.Atr ?? TechnicalIndicators.Atr(candleStore.Get(symbol, TimeFrame.FiveMinutes), _strategyOptions.AtrPeriod);
         if (atr <= 0m)
         {
             logger.LogWarning("========== AI TRADE BLOCKED | ATR is unavailable ==========");

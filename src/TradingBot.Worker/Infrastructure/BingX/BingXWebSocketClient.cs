@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
@@ -15,51 +16,85 @@ public sealed class BingXWebSocketClient(IOptions<BingXOptions> options, ILogger
     private readonly BingXOptions _options = options.Value;
     private DateTimeOffset _nextParseWarningAt;
 
-    public async Task StreamAsync(IReadOnlyList<string> symbols, Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken)
+    public async Task StreamAsync(IReadOnlyList<string> symbols, ChannelReader<string> additionalSymbols,
+        Func<MarketUpdate, Task> onUpdate, CancellationToken cancellationToken)
     {
+        using var streamCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cancellationToken = streamCancellation.Token;
         using var socket = new ClientWebSocket();
         await socket.ConnectAsync(new Uri(_options.WebSocketUrl), cancellationToken);
+        var subscribedSymbols = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var symbol in symbols)
         {
-            foreach (var interval in new[] { "5m", "15m", "30m", "1h" })
-            {
-                var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{symbol}@kline_{interval}" });
-                await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
-            }
+            if (subscribedSymbols.Add(symbol))
+                await SubscribeAsync(socket, symbol, cancellationToken);
         }
 
         logger.LogInformation("Connected to BingX perpetual market WebSocket for {Symbols}", string.Join(", ", symbols));
-        while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
+        var messageTask = ReceiveMessageAsync(socket, cancellationToken);
+        var subscriptionTask = additionalSymbols.ReadAsync(cancellationToken).AsTask();
+        try
         {
-            var message = await ReceiveMessageAsync(socket, cancellationToken);
-            if (message is null) break;
-            if (message.Equals("Ping", StringComparison.OrdinalIgnoreCase))
+            while (socket.State == WebSocketState.Open && !cancellationToken.IsCancellationRequested)
             {
-                await socket.SendAsync(Encoding.UTF8.GetBytes("Pong"), WebSocketMessageType.Text, true, cancellationToken);
-                continue;
-            }
-
-            var parsedUpdates = ParseUpdates(message);
-            if (parsedUpdates.Count == 0 && message.Contains("@kline_", StringComparison.Ordinal))
-            {
-                var now = DateTimeOffset.UtcNow;
-                if (now >= _nextParseWarningAt)
+                if (subscriptionTask.IsCompleted || await Task.WhenAny((Task)messageTask, subscriptionTask) == subscriptionTask)
                 {
-                    logger.LogWarning("Received an unrecognized BingX K-line payload; suppressing repeated warnings for one minute");
-                    _nextParseWarningAt = now.AddMinutes(1);
+                    var symbol = await subscriptionTask;
+                    if (subscribedSymbols.Add(symbol))
+                    {
+                        await SubscribeAsync(socket, symbol, cancellationToken);
+                        logger.LogInformation("Added BingX perpetual market WebSocket subscriptions for {Symbol}", symbol);
+                    }
+                    subscriptionTask = additionalSymbols.ReadAsync(cancellationToken).AsTask();
+                    continue;
+                }
+
+                var message = await messageTask;
+                if (message is null) break;
+                messageTask = ReceiveMessageAsync(socket, cancellationToken);
+                if (message.Equals("Ping", StringComparison.OrdinalIgnoreCase))
+                {
+                    await socket.SendAsync(Encoding.UTF8.GetBytes("Pong"), WebSocketMessageType.Text, true, cancellationToken);
+                    continue;
+                }
+
+                var parsedUpdates = ParseUpdates(message);
+                if (parsedUpdates.Count == 0 && message.Contains("@kline_", StringComparison.Ordinal))
+                {
+                    var now = DateTimeOffset.UtcNow;
+                    if (now >= _nextParseWarningAt)
+                    {
+                        logger.LogWarning("Received an unrecognized BingX K-line payload; suppressing repeated warnings for one minute");
+                        _nextParseWarningAt = now.AddMinutes(1);
+                    }
+                }
+
+                foreach (var update in parsedUpdates)
+                {
+                    if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FiveMinutes)
+                    {
+                        logger.LogInformation("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
+                            update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,
+                            update.Candle.Close, update.Candle.Volume, update.Candle.OpenTime, update.Candle.IsClosed);
+                    }
+                    await onUpdate(update);
                 }
             }
+        }
+        finally
+        {
+            await streamCancellation.CancelAsync();
+            try { await Task.WhenAll((Task)messageTask, subscriptionTask); }
+            catch (Exception exception) when (exception is OperationCanceledException or WebSocketException or ChannelClosedException) { }
+        }
+    }
 
-            foreach (var update in parsedUpdates)
-            {
-                if (_options.LogRawPriceUpdates && update.TimeFrame == TimeFrame.FifteenMinutes)
-                {
-                    logger.LogInformation("BingX raw price update: {Symbol} {TimeFrame} open={Open} high={High} low={Low} close={Close} volume={Volume} openTime={OpenTime} closed={IsClosed}",
-                        update.Symbol, update.TimeFrame, update.Candle.Open, update.Candle.High, update.Candle.Low,
-                        update.Candle.Close, update.Candle.Volume, update.Candle.OpenTime, update.Candle.IsClosed);
-                }
-                await onUpdate(update);
-            }
+    private static async Task SubscribeAsync(ClientWebSocket socket, string symbol, CancellationToken cancellationToken)
+    {
+        foreach (var interval in new[] { "5m", "30m", "1h" })
+        {
+            var request = JsonSerializer.Serialize(new { id = Guid.NewGuid().ToString(), reqType = "sub", dataType = $"{symbol}@kline_{interval}" });
+            await socket.SendAsync(Encoding.UTF8.GetBytes(request), WebSocketMessageType.Text, true, cancellationToken);
         }
     }
 

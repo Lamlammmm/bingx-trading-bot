@@ -87,9 +87,9 @@ public sealed class OpenAiDecisionLoggingTests
 
     private static MarketUpdate CreateClosedUpdate()
     {
-        var openTime = DateTimeOffset.UtcNow.AddMinutes(-15);
-        return new MarketUpdate("BTC-USDT", TimeFrame.FifteenMinutes,
-            new Candle(openTime, openTime.AddMinutes(15), 99m, 101m, 98m, 100m, 10m, true));
+        var openTime = DateTimeOffset.UtcNow.AddMinutes(-5);
+        return new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
+            new Candle(openTime, openTime.AddMinutes(5), 99m, 101m, 98m, 100m, 10m, true));
     }
 
     private sealed class StubAnalyzer(AiDecision? decision) : IOpenAiAnalyzer
