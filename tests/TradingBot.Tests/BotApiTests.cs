@@ -6,7 +6,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
+using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
 
 namespace TradingBot.Tests;
@@ -48,6 +50,17 @@ public sealed class BotApiTests
         await using var factory = new BotApiFactory("");
         var error = Assert.Throws<InvalidOperationException>(() => factory.CreateClient());
         Assert.Contains("Api:Key", error.Message);
+    }
+
+    [Theory]
+    [InlineData("PaperTrading:Macd:Fast", "0", "PaperTrading:Macd")]
+    [InlineData("Live:Macd:Slow", "12", "Live:Macd")]
+    [InlineData("Live:Macd:Signal", "0", "Live:Macd")]
+    public async Task InvalidMacdOptionsPreventStartup(string key, string value, string section)
+    {
+        await using var factory = new BotApiFactory(overrides: new Dictionary<string, string?> { [key] = value });
+        var error = Assert.Throws<OptionsValidationException>(() => factory.CreateClient());
+        Assert.Contains(section, error.Message);
     }
 
     [Fact]
@@ -97,7 +110,8 @@ public sealed class BotApiTests
         Assert.Equal("SOL-USDT", (await queue.Reader.ReadAsync()).Symbol);
     }
 
-    private sealed class BotApiFactory(string apiKey = BotApiFactory.ApiKey) : WebApplicationFactory<Program>
+    private sealed class BotApiFactory(string apiKey = BotApiFactory.ApiKey, Dictionary<string, string?>? overrides = null)
+        : WebApplicationFactory<Program>
     {
         public const string ApiKey = "local-api-test-key";
 
@@ -105,13 +119,17 @@ public sealed class BotApiTests
         {
             builder.UseEnvironment("Testing");
             builder.UseSetting("Bot:Enabled", "false");
-            builder.ConfigureAppConfiguration((_, configuration) => configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            builder.ConfigureAppConfiguration((_, configuration) =>
             {
-                ["Bot:Enabled"] = "false",
-                ["Api:Key"] = apiKey,
-                ["Live:Enabled"] = "true", // Disabled bot must still never trade.
-                ["Seq:Url"] = ""
-            }));
+                configuration.AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    ["Bot:Enabled"] = "false",
+                    ["Api:Key"] = apiKey,
+                    ["Live:Enabled"] = "true", // Disabled bot must still never trade.
+                    ["Seq:Url"] = ""
+                });
+                if (overrides is not null) configuration.AddInMemoryCollection(overrides);
+            });
             builder.ConfigureServices(services => services.PostConfigure<TradingBot.Worker.Configuration.BingXOptions>(options =>
                 options.Symbols = new() { "BTC-USDT", "ETH-USDT" }));
         }

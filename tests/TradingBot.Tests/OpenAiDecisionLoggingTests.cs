@@ -17,6 +17,7 @@ public sealed class OpenAiDecisionLoggingTests
             "No confirmed breakout", "Wait for a closed candle above resistance");
         var engine = CreateEngine(decision, null, logger);
 
+        await engine.InitializeAsync(CancellationToken.None);
         await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiNoTrade"));
@@ -34,6 +35,7 @@ public sealed class OpenAiDecisionLoggingTests
             100m, 2m, "technical confirmation");
         var engine = CreateEngine(decision, technicalSignal, logger);
 
+        await engine.InitializeAsync(CancellationToken.None);
         await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiTrade"));
@@ -47,6 +49,7 @@ public sealed class OpenAiDecisionLoggingTests
         var logger = new ListLogger<PaperTradingEngine>();
         var engine = CreateEngine(null, null, logger);
 
+        await engine.InitializeAsync(CancellationToken.None);
         await engine.ProcessAsync(CreateClosedUpdate(), CancellationToken.None);
 
         var resultLog = Assert.Single(logger.Entries.Where(entry => entry.EventId.Name == "AiError"));
@@ -65,6 +68,7 @@ public sealed class OpenAiDecisionLoggingTests
             new StrategySignal("BTC-USDT", TradeDirection.Long, DateTimeOffset.UtcNow, 100m, 2m, "technical confirmation"), logger);
 
         var update = CreateClosedUpdate() with { IsReconciliation = true };
+        await engine.InitializeAsync(CancellationToken.None);
         await engine.ProcessAsync(update, CancellationToken.None);
 
         Assert.DoesNotContain(logger.Messages, message => message.Contains("PAPER OPEN", StringComparison.Ordinal));

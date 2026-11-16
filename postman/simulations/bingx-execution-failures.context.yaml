@@ -1,0 +1,12 @@
+purpose:
+  stands_in_for: Synthetic BingX order HTTP failures and partial position state; does not execute exchange orders.
+  unblocks: Check the production signed executor does not retry ambiguous order writes or accept a partial position as fully protected.
+assumptions:
+  - id: ambiguous-write-no-retry
+    status: supported
+    claim: The caller sends one order request and surfaces an error when the stand-in commits it then delays past the client timeout.
+    reason: The observed stand-in write count and surfaced timeout establish no executor retry in this scenario. The failure injection is synthetic and does not establish BingX latency, idempotency retention, or real fills. Owner mock discovery was skipped because this CLI does not provide status/auth state for the required discovery workflow; the mock uses current official response envelopes and caller contract.
+    verification: On 2026-11-06 the production executor passed 6 local HTTP scenarios. Success wrote once; HTTP 429, HTTP 502 HTML and code 100410 surfaced errors with zero writes. Timeout after the mock committed produced TaskCanceledException with one request and one write. A 0.5 position rejected validation for requested quantity 1. Mock request logs and control state confirmed the paths ran. Existing unit tests separately verify the engine pending-order latch survives restart. No real exchange order was sent.
+    source: tests/TradingBot.ExecutionSmoke/Program.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.cs; tests/TradingBot.Tests/LiveTradingEngineTests.cs
+    updated_at: "2026-11-06"
+fingerprints: []

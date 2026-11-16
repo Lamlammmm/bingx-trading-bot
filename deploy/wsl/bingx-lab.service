@@ -1,0 +1,17 @@
+[Unit]
+Description=BingX Web API WSL lab
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+WorkingDirectory=/opt/bingx-lab/app
+ExecStart=/usr/bin/dotnet /opt/bingx-lab/app/TradingBot.Worker.dll
+User=www-data
+EnvironmentFile=/etc/bingx-lab.env
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=60
+SyslogIdentifier=bingx-lab
+
+[Install]
+WantedBy=multi-user.target

@@ -102,7 +102,7 @@ public sealed class PaperTradingEngineTests
         var strategy = new CapturingStrategy();
         var engine = new PaperTradingEngine(new InMemoryCandleStore(), strategy,
             new RiskManager(Options.Create(new RiskOptions())), analyzer, new CapturingTradeStore(),
-            new InMemoryContractStore(), Options.Create(new RiskOptions()), Options.Create(new PaperTradingOptions()),
+            new InMemoryContractStore(), Options.Create(new RiskOptions()), Options.Create(new PaperTradingOptions { MaximumEntryAgeSeconds = 0 }),
             Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance);
         await engine.InitializeAsync(default);
         foreach (var frame in new[] { TimeFrame.FifteenMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })

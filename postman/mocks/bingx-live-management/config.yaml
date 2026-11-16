@@ -1,0 +1,10 @@
+version: 1
+name: bingx-live-management
+slug: bingx-live-management
+protocol: http
+interceptRequests: true
+port: 4500
+scenarios:
+  - name: default
+    path: ./default.js
+    default: true

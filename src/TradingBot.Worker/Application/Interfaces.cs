@@ -17,6 +17,7 @@ public interface IContractStore
 
 public interface IBingXMarketClient
 {
+    Task<decimal?> GetSpreadBasisPointsAsync(string symbol, CancellationToken cancellationToken) => Task.FromResult<decimal?>(null);
     Task<IReadOnlyList<Candle>> GetCandlesAsync(string symbol, TimeFrame timeFrame, int limit, CancellationToken cancellationToken);
     Task<ContractInfo?> GetContractAsync(string symbol, CancellationToken cancellationToken);
 }
@@ -29,12 +30,27 @@ public interface IBingXMarketStream
 
 public interface ITradingStrategy
 {
+    SignalEvaluation? LastEvaluation => null;
     StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> entryCandles,
         IReadOnlyList<Candle> mediumTrendCandles, IReadOnlyList<Candle> higherTrendCandles);
 }
 
 public interface ILiveExecutor
 {
+    Task<LiveAccountSnapshot> GetAccountSnapshotAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, DateTimeOffset until, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<decimal> GetMarkPriceAsync(string symbol, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<LivePositionSnapshot> GetPositionAsync(string symbol, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<LiveManagedPosition> GetManagedPositionAsync(string symbol, TradeDirection direction, decimal quantity,
+        decimal stopLoss, decimal takeProfit, string? stopOrderId, string? takeOrderId, CancellationToken cancellationToken,
+        bool allowOversizedProtection = false) => throw new NotSupportedException();
+    Task<LiveOrderFill> GetOrderFillAsync(string symbol, string clientOrderId, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<LiveOrderReceipt> CloseMarketPositionAsync(string symbol, TradeDirection direction, decimal quantity,
+        string clientOrderId, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task<string> ReplaceProtectionAsync(string symbol, TradeDirection direction, string orderId, string orderType,
+        decimal quantity, decimal triggerPrice, CancellationToken cancellationToken) => throw new NotSupportedException();
+    Task CancelKnownProtectionAsync(string symbol, IReadOnlyCollection<string> orderIds, CancellationToken cancellationToken) => throw new NotSupportedException();
     Task<string> GetPositionHistoryAsync(string symbol, DateTimeOffset since, CancellationToken cancellationToken);
     Task ValidatePositionModeAsync(CancellationToken cancellationToken);
     Task<int> GetOpenOrderCountAsync(CancellationToken cancellationToken, string? symbol = null);
@@ -51,6 +67,7 @@ public interface ILiveExecutor
 
 public interface IRiskManager
 {
+    string? LastRejectionReason => null;
     TradePlan? CreatePlan(StrategySignal signal, decimal accountBalance, PaperPosition? openPosition,
         decimal realizedPnlToday, decimal aggregateOpenRisk, ContractInfo? contract);
 }
@@ -63,6 +80,17 @@ public interface IOpenAiAnalyzer
 
 public interface ITradeStore
 {
+    Task CommitPaperStateWithJournalAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, IReadOnlyCollection<TradingJournalEvent> events, CancellationToken token) =>
+        throw new NotSupportedException("Atomic unified journal persistence is required.");
+    async Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, CancellationToken cancellationToken)
+    {
+        // Test/third-party stores can keep the small interface; production stores override atomically.
+        await SaveAccountStateAsync(account, cancellationToken);
+        await SaveOpenPositionsAsync(positions, cancellationToken);
+        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, cancellationToken);
+    }
     Task InitializeAsync(CancellationToken cancellationToken);
     Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken);
     Task<TradePerformance?> LoadTradePerformanceAsync(CancellationToken cancellationToken);
@@ -78,4 +106,18 @@ public interface ILiveTradeJournal
     Task InitializeJournalAsync(CancellationToken cancellationToken);
     Task RecordLiveEventAsync(LiveTradeEvent entry, CancellationToken cancellationToken);
     IAsyncEnumerable<LiveTradeEvent> ReadLiveEventsAsync(CancellationToken cancellationToken);
+}
+
+public interface ITradingResearchStore
+{
+    Task InitializeAsync(CancellationToken token);
+    Task AppendAsync(TradingJournalEvent entry, CancellationToken token);
+    IAsyncEnumerable<TradingJournalEvent> ReadAsync(TradingMode mode, DateTimeOffset since, CancellationToken token, string? kind = null);
+    Task<StrategyRegistration?> GetActiveAsync(TradingMode mode, CancellationToken token);
+    Task<StrategyRegistration?> GetVersionAsync(TradingMode mode, string version, CancellationToken token);
+    Task RegisterAsync(StrategyRegistration registration, bool bootstrap, CancellationToken token);
+    Task PromoteAsync(TradingMode mode, string version, string expectedActiveVersion, string approvedBy,
+        string action, CancellationToken token);
+    Task<bool> IsHaltedAsync(TradingMode mode, CancellationToken token);
+    Task SetHaltAsync(TradingMode mode, bool halted, string reason, CancellationToken token);
 }

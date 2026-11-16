@@ -1,0 +1,5 @@
+simulation: bingx-live-management
+routing: header
+mocks:
+  - routeKey: bingx
+    path: ../mocks/bingx-live-management/config.yaml

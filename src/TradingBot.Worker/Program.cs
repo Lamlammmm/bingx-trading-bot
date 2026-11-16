@@ -36,10 +36,15 @@ builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptio
 builder.Services.Configure<BingXOptions>(builder.Configuration.GetSection(BingXOptions.SectionName));
 builder.Services.Configure<StrategyOptions>(builder.Configuration.GetSection(StrategyOptions.SectionName));
 builder.Services.Configure<RiskOptions>(builder.Configuration.GetSection(RiskOptions.SectionName));
-builder.Services.Configure<PaperTradingOptions>(builder.Configuration.GetSection(PaperTradingOptions.SectionName));
+builder.Services.AddOptions<PaperTradingOptions>().BindConfiguration(PaperTradingOptions.SectionName)
+    .Validate(options => options.Macd.IsValid, "PaperTrading:Macd requires Fast > 0, Slow > Fast and Signal > 0.")
+    .ValidateOnStart();
 builder.Services.Configure<OpenAIOptions>(builder.Configuration.GetSection(OpenAIOptions.SectionName));
 builder.Services.Configure<PersistenceOptions>(builder.Configuration.GetSection(PersistenceOptions.SectionName));
-builder.Services.Configure<LiveOptions>(builder.Configuration.GetSection(LiveOptions.SectionName));
+builder.Services.AddOptions<LiveOptions>().BindConfiguration(LiveOptions.SectionName)
+    .Validate(options => options.Macd.IsValid, "Live:Macd requires Fast > 0, Slow > Fast and Signal > 0.")
+    .ValidateOnStart();
+builder.Services.Configure<AdaptiveOptions>(builder.Configuration.GetSection(AdaptiveOptions.SectionName));
 builder.Services.PostConfigure<LiveOptions>(options =>
     options.StatePath = Path.GetFullPath(options.StatePath, builder.Environment.ContentRootPath));
 builder.Services.PostConfigure<PersistenceOptions>(options =>
@@ -113,8 +118,19 @@ builder.Services.AddSingleton<ITradeStore>(serviceProvider =>
         ? new PostgresTradeStore(persistenceOptions)
         : new SqliteTradeStore(persistenceOptions);
 });
-builder.Services.AddSingleton<ITradingStrategy, BreakoutStrategy>();
+builder.Services.AddSingleton<ITradingStrategy>(provider =>
+{
+    var options = provider.GetRequiredService<Microsoft.Extensions.Options.IOptions<StrategyOptions>>();
+    return options.Value.UseMultiTimeframeAnalysis ? new MultiTimeframeStrategy(options) : new BreakoutStrategy(options);
+});
 builder.Services.AddSingleton<ILiveTradeJournal>(provider => (ILiveTradeJournal)provider.GetRequiredService<ITradeStore>());
+builder.Services.AddSingleton<ITradingResearchStore>(provider => provider.GetRequiredService<ITradeStore>() switch
+{
+    PostgresTradeStore postgres => postgres.Research,
+    SqliteTradeStore sqlite => sqlite.Research,
+    _ => throw new InvalidOperationException("The trade store must support the unified journal.")
+});
+builder.Services.AddSingleton<TradingGovernance>();
 builder.Services.AddSingleton<IRiskManager, RiskManager>();
 builder.Services.AddSingleton<IBingXMarketStream, BingXWebSocketClient>();
 builder.Services.AddSingleton<PaperTradingEngine>();
@@ -126,9 +142,14 @@ if (builder.Configuration.GetValue("Bot:Enabled", true))
 {
     builder.Services.AddHostedService<BingXMarketDataWorker>();
     builder.Services.AddHostedService<TradingWorker>();
+    builder.Services.AddHostedService<TradingAnalyticsWorker>();
 }
 
 using var host = builder.Build();
+if (args.Any(a => a.StartsWith("--trading-", StringComparison.Ordinal) || a.StartsWith("--strategy-", StringComparison.Ordinal)))
+{
+    if (await TradingResearchCommands.RunAsync(host.Services.GetRequiredService<TradingGovernance>(), args)) return;
+}
 if (args.Contains("--export-trade-analysis", StringComparer.OrdinalIgnoreCase))
 {
     var store = host.Services.GetRequiredService<ITradeStore>();
@@ -150,7 +171,7 @@ if (args.Contains("--export-trade-analysis", StringComparer.OrdinalIgnoreCase))
                 row.Trade.EntryPrice, row.Trade.ExitPrice, row.Trade.StopLoss,
                 row.Trade.TakeProfit, row.Trade.NetPnl, row.Trade.ExitReason,
                 row.Trade.Source, row.Trade.OpenedAt, row.Trade.ClosedAt,
-                EntryFeatures = row.Features
+                EntryFeatures = row.Features, row.Trade.Metrics
             }));
             paperCount++;
         }

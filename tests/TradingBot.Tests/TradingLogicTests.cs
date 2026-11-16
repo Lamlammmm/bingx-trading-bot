@@ -171,7 +171,7 @@ public sealed class TradingLogicTests
         Assert.Equal(50m, plan.RiskAmount, 8);
         Assert.Equal(97m, plan.StopLoss);
         Assert.Equal(106m, plan.TakeProfit);
-        Assert.Equal(50m / 3m, plan.Quantity, 8);
+        Assert.Equal(50m / (3m + (100m + 97m) * 0.0005m), plan.Quantity, 8);
     }
 
     [Fact]
@@ -220,11 +220,11 @@ public sealed class TradingLogicTests
         Assert.Equal(100.12m, plan.EntryPrice);
         Assert.Equal(97.12m, plan.StopLoss);
         Assert.Equal(106.12m, plan.TakeProfit);
-        Assert.Equal(16.66m, plan.Quantity);
+        Assert.Equal(16.13m, plan.Quantity);
     }
 
     [Fact]
-    public void RiskManager_TargetsOneUsdtGrossProfitWithTwoToOneReward()
+    public void RiskManager_ProfitCapNeverOverridesTheFeeInclusiveRiskBudget()
     {
         var riskManager = new RiskManager(Options.Create(new RiskOptions
         {
@@ -241,9 +241,9 @@ public sealed class TradingLogicTests
         var plan = riskManager.CreatePlan(signal, 100m, null, 0m, 0m, null);
 
         Assert.NotNull(plan);
-        Assert.Equal(1m / 6m, plan.Quantity);
+        Assert.Equal(0.5m / (3m + (100m + 97m) * 0.0005m), plan.Quantity);
         Assert.Equal(0.5m, plan.RiskAmount, 8);
-        Assert.Equal(1m, plan.Quantity * (plan.TakeProfit - plan.EntryPrice), 8);
+        Assert.InRange(plan.Quantity * (plan.TakeProfit - plan.EntryPrice), 0m, 1m);
     }
 
     private static IReadOnlyList<Candle> BuildCandles(int count, TimeSpan interval, decimal start, decimal step,

@@ -4,6 +4,10 @@ Bot ASP.NET Core .NET 8 cho BingX USDT-M Perpetual Futures, gồm paper trading 
 
 HTTP host yêu cầu `Api__Key`; truyền qua biến môi trường. `Bot__Enabled=false` chỉ mở HTTP, không khởi tạo market/trading worker. Theo dõi bằng `GET /health/live`, `GET /health/ready` và `GET /api/bot/status` (header `X-Api-Key`). Xem [API contract](postman/bot-api-contract.md).
 
+PAPER và LIVE hiện dùng shared strategy/risk/position formulas, unified journal tách mode trên PostgreSQL/Supabase, deterministic adaptive rules và version/approval/rollback. Xem [thiết kế, schema, kiểm chứng và cách vận hành](docs/adaptive-trading.md). AI vẫn disabled; candidate không tự thay active Live. Các mô tả “giai đoạn 1” bên dưới là lịch sử.
+
+Để thực hành deploy trực tiếp trên Ubuntu WSL bằng systemd + Nginx, xem [DEPLOY_WSL_NGINX.md](DEPLOY_WSL_NGINX.md). Có sẵn cấu hình lab chỉ mở HTTP, tắt worker giao dịch ở lần chạy đầu.
+
 ## Phạm vi giai đoạn 1
 
 - REST backfill nến đóng cho `5m`, `30m`, `1h`; nến `5m` dùng để vào lệnh và kiểm tra SL/TP paper.
@@ -105,6 +109,8 @@ docker compose logs -f --tail=100 trading-bot
 ```
 
 Hướng dẫn chuyển state/DB, kiểm tra API và giữ bot chạy nền trên Ubuntu nằm trong [DEPLOY_UBUNTU.md](DEPLOY_UBUNTU.md).
+
+Để cài Ubuntu lần đầu và bật CI/CD qua GitHub Actions/SSH, xem [CI_CD_UBUNTU.md](CI_CD_UBUNTU.md).
 
 Log cần quan sát:
 

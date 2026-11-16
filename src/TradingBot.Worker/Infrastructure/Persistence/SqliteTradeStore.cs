@@ -9,6 +9,14 @@ namespace TradingBot.Worker.Infrastructure.Persistence;
 
 public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITradeStore, ILiveTradeJournal
 {
+    public ITradingResearchStore Research
+    {
+        get
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_databasePath))!);
+            return new SqlTradingResearchStore(() => new SqliteConnection(BuildConnectionString()));
+        }
+    }
     private readonly string _databasePath = options.Value.DatabasePath;
 
 
@@ -94,7 +102,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         var accountColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         await using (var reader = await accountColumnsCommand.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken)) accountColumns.Add(reader.GetString(1));
-        foreach (var (name, sqlType) in new[] { ("TotalWins", "INTEGER NOT NULL DEFAULT 0"), ("TotalLosses", "INTEGER NOT NULL DEFAULT 0"), ("TotalNetPnl", "TEXT NOT NULL DEFAULT '0'") })
+        foreach (var (name, sqlType) in new[] { ("TotalWins", "INTEGER NOT NULL DEFAULT 0"), ("TotalLosses", "INTEGER NOT NULL DEFAULT 0"), ("TotalNetPnl", "TEXT NOT NULL DEFAULT '0'"), ("RiskControls", "TEXT NULL") })
         {
             if (accountColumns.Contains(name)) continue;
             await using var alter = connection.CreateCommand();
@@ -127,7 +135,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         foreach (var (name, sqlType) in new[]
         {
             ("InitialStopLoss", "TEXT"), ("PartialTaken", "INTEGER NOT NULL DEFAULT 0"),
-            ("InitialQuantity", "TEXT"), ("RealizedPartialPnl", "TEXT NOT NULL DEFAULT '0'")
+            ("InitialQuantity", "TEXT"), ("RealizedPartialPnl", "TEXT NOT NULL DEFAULT '0'"), ("Metrics", "TEXT NULL")
         })
         {
             if (openPositionColumns.Contains(name)) continue;
@@ -183,7 +191,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         {
             ("Rsi5m", "TEXT"), ("Rsi15m", "TEXT"), ("Rsi1h", "TEXT"), ("Atr5m", "TEXT"),
             ("EmaFast5m", "TEXT"), ("EmaSlow5m", "TEXT"), ("VolumeRatio5m", "TEXT"),
-            ("BodyRatio5m", "TEXT"), ("Confidence", "TEXT"), ("HourOfDayUtc", "INTEGER"), ("DayOfWeekUtc", "INTEGER"),
+            ("BodyRatio5m", "TEXT"), ("Confidence", "TEXT"), ("HourOfDayUtc", "INTEGER"), ("DayOfWeekUtc", "INTEGER"), ("Metrics", "TEXT"),
         };
         foreach (var (name, sqlType) in featureColumns)
         {
@@ -194,13 +202,39 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         }
     }
 
+
+    public async Task CommitPaperStateWithJournalAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, IReadOnlyCollection<TradingJournalEvent> events, CancellationToken token)
+    {
+        await using var connection = new SqliteConnection(BuildConnectionString());
+        await connection.OpenAsync(token);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token);
+        await SaveAccountStateAsync(account, connection, transaction, token);
+        await SaveOpenPositionsAsync(positions, connection, transaction, token);
+        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, token);
+        foreach (var entry in events) await SqlTradingResearchStore.AppendInTransactionAsync(connection, transaction, entry, token);
+        await transaction.CommitAsync(token);
+    }
+
+    public async Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(BuildConnectionString());
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveAccountStateAsync(account, connection, transaction, cancellationToken);
+        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
+        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
     public async Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Balance, BalanceDate, RealizedPnlToday, TotalWins, TotalLosses, TotalNetPnl FROM AccountState WHERE Id = 1;";
+        command.CommandText = "SELECT Balance, BalanceDate, RealizedPnlToday, TotalWins, TotalLosses, TotalNetPnl, RiskControls FROM AccountState WHERE Id = 1;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
 
@@ -210,29 +244,39 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             decimal.Parse(reader.GetString(2), System.Globalization.CultureInfo.InvariantCulture),
             reader.GetInt32(3),
             reader.GetInt32(4),
-            decimal.Parse(reader.GetString(5), System.Globalization.CultureInfo.InvariantCulture));
+            decimal.Parse(reader.GetString(5), System.Globalization.CultureInfo.InvariantCulture),
+            reader.IsDBNull(6) ? null : JsonSerializer.Deserialize<RiskControlState>(reader.GetString(6)));
     }
 
     public async Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveAccountStateAsync(state, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
 
+    private static async Task SaveAccountStateAsync(AccountState state, SqliteConnection connection,
+        SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO AccountState (Id, Balance, BalanceDate, RealizedPnlToday, TotalWins, TotalLosses, TotalNetPnl)
-            VALUES (1, $balance, $balanceDate, $realizedPnlToday, $totalWins, $totalLosses, $totalNetPnl)
+            INSERT INTO AccountState (Id, Balance, BalanceDate, RealizedPnlToday, TotalWins, TotalLosses, TotalNetPnl, RiskControls)
+            VALUES (1, $balance, $balanceDate, $realizedPnlToday, $totalWins, $totalLosses, $totalNetPnl, $riskControls)
             ON CONFLICT(Id) DO UPDATE SET
                 Balance = excluded.Balance,
                 BalanceDate = excluded.BalanceDate,
                 RealizedPnlToday = excluded.RealizedPnlToday,
                 TotalWins = excluded.TotalWins,
                 TotalLosses = excluded.TotalLosses,
-                TotalNetPnl = excluded.TotalNetPnl;
+                TotalNetPnl = excluded.TotalNetPnl, RiskControls = excluded.RiskControls;
             """;
         command.Parameters.AddWithValue("$balance", state.Balance.ToString(System.Globalization.CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$balanceDate", state.BalanceDate.ToString("O"));
         command.Parameters.AddWithValue("$realizedPnlToday", state.RealizedPnlToday.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$riskControls", JsonSerializer.Serialize(state.RiskControls));
         command.Parameters.AddWithValue("$totalWins", state.TotalWins);
         command.Parameters.AddWithValue("$totalLosses", state.TotalLosses);
         command.Parameters.AddWithValue("$totalNetPnl", state.TotalNetPnl.ToString(System.Globalization.CultureInfo.InvariantCulture));
@@ -269,7 +313,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             SELECT Id, Symbol, Direction, Quantity, EntryPrice, ExitPrice, StopLoss, TakeProfit,
                    NetPnl, ExitReason, Source, OpenedAt, ClosedAt, Rsi5m, Rsi15m, Rsi1h,
                    Atr5m, EmaFast5m, EmaSlow5m, VolumeRatio5m, BodyRatio5m, Confidence,
-                   HourOfDayUtc, DayOfWeekUtc
+                   HourOfDayUtc, DayOfWeekUtc, Metrics
             FROM ClosedTrades ORDER BY Id;
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -292,7 +336,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
                 decimal.Parse(reader.GetString(5), invariant), decimal.Parse(reader.GetString(6), invariant),
                 decimal.Parse(reader.GetString(7), invariant), decimal.Parse(reader.GetString(8), invariant),
                 reader.GetString(9), reader.GetString(10), DateTimeOffset.Parse(reader.GetString(11), invariant),
-                DateTimeOffset.Parse(reader.GetString(12), invariant));
+                DateTimeOffset.Parse(reader.GetString(12), invariant), Metrics: reader.IsDBNull(24) ? null : JsonSerializer.Deserialize<TradeMetrics>(reader.GetString(24)));
             yield return new StoredPaperTrade(reader.GetInt64(0), trade, features);
         }
     }
@@ -302,7 +346,7 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken, InitialQuantity, RealizedPartialPnl FROM OpenPositions;";
+        command.CommandText = "SELECT Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken, InitialQuantity, RealizedPartialPnl, Metrics FROM OpenPositions;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
         var positions = new List<PaperPosition>();
@@ -323,7 +367,8 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
                 featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson),
                 initialStopLoss, partialTaken,
                 reader.IsDBNull(12) ? decimal.Parse(reader.GetString(2), invariant) : decimal.Parse(reader.GetString(12), invariant),
-                reader.IsDBNull(13) ? 0m : decimal.Parse(reader.GetString(13), invariant)));
+                reader.IsDBNull(13) ? 0m : decimal.Parse(reader.GetString(13), invariant),
+                reader.IsDBNull(14) ? null : JsonSerializer.Deserialize<PositionMetrics>(reader.GetString(14))));
         }
         return positions;
     }
@@ -332,7 +377,14 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
     {
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, SqliteConnection connection,
+        SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = (SqliteTransaction)transaction;
@@ -346,10 +398,11 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             insert.Transaction = (SqliteTransaction)transaction;
             insert.CommandText = """
                 INSERT INTO OpenPositions
-                    (Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken, InitialQuantity, RealizedPartialPnl)
-                VALUES ($symbol, $direction, $quantity, $entryPrice, $stopLoss, $takeProfit, $riskAmount, $entryFee, $openedAt, $entryFeatures, $initialStopLoss, $partialTaken, $initialQuantity, $realizedPartialPnl);
+                    (Symbol, Direction, Quantity, EntryPrice, StopLoss, TakeProfit, RiskAmount, EntryFee, OpenedAt, EntryFeatures, InitialStopLoss, PartialTaken, InitialQuantity, RealizedPartialPnl, Metrics)
+                VALUES ($symbol, $direction, $quantity, $entryPrice, $stopLoss, $takeProfit, $riskAmount, $entryFee, $openedAt, $entryFeatures, $initialStopLoss, $partialTaken, $initialQuantity, $realizedPartialPnl, $metrics);
                 """;
             var invariant = System.Globalization.CultureInfo.InvariantCulture;
+            insert.Parameters.AddWithValue("$metrics", JsonSerializer.Serialize(position.Metrics));
             insert.Parameters.AddWithValue("$symbol", position.Symbol);
             insert.Parameters.AddWithValue("$direction", position.Direction.ToString());
             insert.Parameters.AddWithValue("$quantity", position.Quantity.ToString(invariant));
@@ -366,24 +419,32 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             insert.Parameters.AddWithValue("$realizedPartialPnl", position.RealizedPartialPnl.ToString(invariant));
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await RecordClosedTradeAsync(trade, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
 
+    private static async Task RecordClosedTradeAsync(ClosedTrade trade, SqliteConnection connection,
+        SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO ClosedTrades
                 (Symbol, Direction, Quantity, EntryPrice, ExitPrice, StopLoss, TakeProfit, NetPnl, ExitReason, Source, OpenedAt, ClosedAt,
-                 Rsi5m, Rsi15m, Rsi1h, Atr5m, EmaFast5m, EmaSlow5m, VolumeRatio5m, BodyRatio5m, Confidence, HourOfDayUtc, DayOfWeekUtc)
+                 Rsi5m, Rsi15m, Rsi1h, Atr5m, EmaFast5m, EmaSlow5m, VolumeRatio5m, BodyRatio5m, Confidence, HourOfDayUtc, DayOfWeekUtc, Metrics)
             VALUES
                 ($symbol, $direction, $quantity, $entryPrice, $exitPrice, $stopLoss, $takeProfit, $netPnl, $exitReason, $source, $openedAt, $closedAt,
-                 $rsi5m, $rsi15m, $rsi1h, $atr5m, $emaFast5m, $emaSlow5m, $volumeRatio5m, $bodyRatio5m, $confidence, $hourOfDayUtc, $dayOfWeekUtc);
+                 $rsi5m, $rsi15m, $rsi1h, $atr5m, $emaFast5m, $emaSlow5m, $volumeRatio5m, $bodyRatio5m, $confidence, $hourOfDayUtc, $dayOfWeekUtc, $metrics);
             """;
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        command.Parameters.AddWithValue("$metrics", JsonSerializer.Serialize(trade.Metrics));
         command.Parameters.AddWithValue("$symbol", trade.Symbol);
         command.Parameters.AddWithValue("$direction", trade.Direction.ToString());
         command.Parameters.AddWithValue("$quantity", trade.Quantity.ToString(invariant));

@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TradingBot.Worker.Configuration;
 
 public sealed class BotOptions
@@ -40,6 +42,15 @@ public sealed class StrategyOptions
     // Distance from the broken level to the retest close, using ATR before breakout. Zero disables this filter.
     public decimal MaxRetestEntryDistanceAtr { get; set; } = 1m;
     public List<string> ExcludedSymbols { get; set; } = new();
+    // Select the same multi-timeframe signal policy for paper and live.
+    public bool UseMultiTimeframeAnalysis { get; set; }
+    public int PrimaryEmaPeriod { get; set; } = 200;
+    public int AdxPeriod { get; set; } = 14;
+    public decimal MinimumAdx { get; set; } = 20m;
+    public decimal MinimumAtrPercent { get; set; } = 0.1m;
+    public decimal MaximumAtrPercent { get; set; } = 3m;
+    public int StructureLookback { get; set; } = 6;
+    public decimal MaximumSetupDistanceAtr { get; set; } = 2m;
 }
 
 public sealed class RiskOptions
@@ -55,6 +66,8 @@ public sealed class RiskOptions
     public decimal MinimumQuantity { get; set; } = 0.0001m;
     public decimal MaximumStopAtrMultiplier { get; set; } = 3m;
     public decimal MinimumTakeProfitRiskMultiple { get; set; } = 1.5m;
+    // Full-position payoff at final TP, after estimated entry/exit fees; not a win-rate estimate.
+    public decimal MinimumNetRewardRiskRatio { get; set; } = 1.5m;
     public decimal MaxAggregateOpenRiskPercent { get; set; } = 2m;
     public decimal TargetProfitUsdt { get; set; } = 1m;
     public bool UseFixedPercentSlTp { get; set; }
@@ -63,6 +76,35 @@ public sealed class RiskOptions
     public bool UsePartialTakeProfit { get; set; } = true;
     public decimal PartialTakeProfitRMultiple { get; set; } = 1m;
     public decimal PartialTakeProfitPercent { get; set; } = 50m;
+    public decimal StructureBufferAtr { get; set; }
+    public decimal ExecutionCostBasisPoints { get; set; }
+    public int MaxOpenPositions { get; set; }
+    public int ExitCooldownBars { get; set; }
+    public int MaximumConsecutiveLosses { get; set; }
+    public int CircuitBreakerMinutes { get; set; } = 60;
+    public bool UseDynamicPositionManagement { get; set; }
+    public decimal SecondTakeProfitRMultiple { get; set; } = 2m;
+    public decimal SecondTakeProfitPercent { get; set; } = 25m;
+    public decimal BreakEvenTriggerR { get; set; } = 1.5m;
+    public decimal TrailingStartR { get; set; } = 2m;
+    public decimal TrailingAtrMultiplier { get; set; } = 2m;
+    public decimal MinimumTrailingStepAtr { get; set; } = 0.25m;
+    public int StopAdjustmentCooldownBars { get; set; } = 3;
+    public decimal MaxDrawdownPercent { get; set; } = 5m;
+    public decimal MaxAggregateExposurePercent { get; set; } = 300m;
+}
+
+public sealed class AdaptiveOptions
+{
+    public const string SectionName = "Adaptive";
+    public bool Enabled { get; set; } = true;
+    public int MinimumTrades { get; set; } = 30;
+    public int LookbackDays { get; set; } = 30;
+    public int AnalysisIntervalMinutes { get; set; } = 5;
+    public decimal MaximumSpreadBasisPoints { get; set; } = 20m;
+    public decimal DegradedRiskMultiplier { get; set; } = 0.5m;
+    public decimal MinimumProfitFactor { get; set; } = 1m;
+    public string BootstrapVersion { get; set; } = "mtf-v1";
 }
 
 public sealed class LiveOptions
@@ -71,6 +113,8 @@ public sealed class LiveOptions
     // Off by default. This places REAL orders with REAL money when true - never flip without
     // understanding the risks documented alongside this feature.
     public bool Enabled { get; set; }
+    // Unset keeps the shared Risk setting for existing configurations.
+    public decimal? RiskPerTradePercent { get; set; }
     public string StatePath { get; set; } = "data/live-state.json";
     public decimal Leverage { get; set; } = 5m;
     public bool AutoLeverage { get; set; }
@@ -80,6 +124,10 @@ public sealed class LiveOptions
     public decimal MaxMarginUsagePercent { get; set; } = 20m;
     public decimal StopAtrMultiplier { get; set; } = 1.5m;
     public decimal TakeProfitRiskMultiple { get; set; } = 2m;
+    public int MaximumConsecutiveApiFailures { get; set; } = 3;
+    public int ApiCircuitBreakerMinutes { get; set; } = 5;
+    public decimal MaximumEntryDeviationBasisPoints { get; set; } = 10m;
+    public MacdOptions Macd { get; set; } = new();
 }
 
 public sealed class PersistenceOptions
@@ -95,6 +143,23 @@ public sealed class PaperTradingOptions
     public const string SectionName = "PaperTrading";
     public decimal SlippageBasisPoints { get; set; } = 2m;
     public decimal FundingRatePerEightHours { get; set; }
+    public decimal SpreadBasisPoints { get; set; }
+    // Zero is reserved for explicit offline replay.
+    public int MaximumEntryAgeSeconds { get; set; } = 120;
+    // MACD is a per-mode runtime gate outside the versioned execution-cost snapshot.
+    [JsonIgnore]
+    public MacdOptions Macd { get; set; } = new();
+}
+
+public sealed class MacdOptions
+{
+    public bool Enabled { get; set; }
+    public int Fast { get; set; } = 12;
+    public int Slow { get; set; } = 26;
+    public int Signal { get; set; } = 9;
+
+    [JsonIgnore]
+    public bool IsValid => Fast > 0 && Slow > Fast && Signal > 0;
 }
 
 public sealed class OpenAIOptions

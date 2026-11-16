@@ -11,3 +11,9 @@ data/
 **/exports/
 **/TestResults/
 migration/
+releases/
+backups/
+deploy.lock
+current-release.txt
+current-image.txt
+previous-image.txt

@@ -1,0 +1,5 @@
+simulation: bingx-execution-failures
+routing: header
+mocks:
+  - routeKey: bingx
+    path: ../mocks/bingx-execution-failures/config.yaml

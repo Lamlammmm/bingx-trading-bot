@@ -22,6 +22,28 @@ public sealed class EntrySignalQualityTests
         Assert.NotNull(signal);
         Assert.Equal(direction, signal.Direction);
         Assert.Equal(retest.Close, signal.EntryPrice);
+        Assert.Equal(direction == TradeDirection.Long ? retest.Low : retest.High, signal.InvalidationPrice);
+    }
+
+    [Theory]
+    [InlineData(TradeDirection.Long)]
+    [InlineData(TradeDirection.Short)]
+    public void InvalidationIncludesEarlierRetestWickBeforeConfirmation(TradeDirection direction)
+    {
+        var strategy = new BreakoutStrategy(Options.Create(new StrategyOptions()));
+        var (entry, medium, higher, retest) = BuildContext(direction);
+        Assert.Null(strategy.Evaluate("BTC-USDT", entry, medium, higher));
+        var waiting = direction == TradeDirection.Long
+            ? retest with { Open = 100.8m, Close = 100.6m, Low = 99.9m }
+            : retest with { Open = 99.2m, Close = 99.4m, High = 100.1m };
+        entry.Add(waiting);
+        Assert.Null(strategy.Evaluate("BTC-USDT", entry, medium, higher));
+        entry.Add(retest with { OpenTime = retest.OpenTime.AddMinutes(5), CloseTime = retest.CloseTime.AddMinutes(5) });
+
+        var signal = strategy.Evaluate("BTC-USDT", entry, medium, higher);
+
+        Assert.NotNull(signal);
+        Assert.Equal(direction == TradeDirection.Long ? waiting.Low : waiting.High, signal.InvalidationPrice);
     }
 
     [Theory]

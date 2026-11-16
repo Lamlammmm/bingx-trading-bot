@@ -13,7 +13,7 @@ namespace TradingBot.Worker.Infrastructure.BingX;
 /// Signed BingX perpetual account queries and protected Hedge-mode orders.
 /// Order writes are invoked only by the enabled live engine; preflight uses queries only.
 /// </summary>
-public sealed class BingXLiveExecutor(HttpClient httpClient, IOptions<BingXOptions> options,
+public sealed partial class BingXLiveExecutor(HttpClient httpClient, IOptions<BingXOptions> options,
     ILogger<BingXLiveExecutor> logger) : ILiveExecutor
 {
     private readonly BingXOptions _options = options.Value;
@@ -261,8 +261,11 @@ public sealed class BingXLiveExecutor(HttpClient httpClient, IOptions<BingXOptio
             codeProperty.ValueKind != JsonValueKind.Number || !codeProperty.TryGetInt32(out var code) || code != 0)
         {
             var errorCode = codeProperty.ValueKind == JsonValueKind.Number ? codeProperty.ToString() : "invalid-code";
+            var errorMessage = document.RootElement.TryGetProperty("msg", out var messageProperty)
+                ? messageProperty.ToString().Replace(_options.ApiKey, "[redacted]").Replace(_options.ApiSecret, "[redacted]")
+                : "No error message returned";
             document.Dispose();
-            throw new InvalidOperationException($"BingX live API rejected {path}: code={errorCode}.");
+            throw new InvalidOperationException($"BingX live API rejected {path}: code={errorCode}, msg={errorMessage}.");
         }
         return document;
     }

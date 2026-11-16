@@ -1,0 +1,43 @@
+{
+  "Bot": { "Enabled": true },
+  "Live": { "Enabled": false },
+  "OpenAI": { "Enabled": false },
+  "Strategy": {
+    "UseMultiTimeframeAnalysis": true,
+    "PrimaryEmaPeriod": 200,
+    "AdxPeriod": 14,
+    "MinimumAdx": 20,
+    "MinimumAtrPercent": 0.1,
+    "MaximumAtrPercent": 3,
+    "StructureLookback": 6,
+    "MaximumSetupDistanceAtr": 2
+  },
+  "Risk": {
+    "UseFixedPercentSlTp": false,
+    "TargetProfitUsdt": 0,
+    "UseDynamicPositionManagement": true,
+    "TakeProfitRiskMultiple": 3,
+    "StructureBufferAtr": 0.2,
+    "ExecutionCostBasisPoints": 4,
+    "MaxOpenPositions": 3,
+    "ExitCooldownBars": 6,
+    "MaximumConsecutiveLosses": 3,
+    "CircuitBreakerMinutes": 60,
+    "PartialTakeProfitRMultiple": 1,
+    "PartialTakeProfitPercent": 50,
+    "SecondTakeProfitRMultiple": 2,
+    "SecondTakeProfitPercent": 25,
+    "BreakEvenTriggerR": 1.5,
+    "TrailingStartR": 2,
+    "TrailingAtrMultiplier": 2,
+    "MinimumTrailingStepAtr": 0.25,
+    "StopAdjustmentCooldownBars": 3
+  },
+  "PaperTrading": {
+    "SlippageBasisPoints": 2,
+    "SpreadBasisPoints": 4,
+    "FundingRatePerEightHours": 0
+  },
+  "Persistence": { "Provider": "Sqlite", "DatabasePath": "data/paper-research.db" },
+  "Seq": { "Url": "" }
+}

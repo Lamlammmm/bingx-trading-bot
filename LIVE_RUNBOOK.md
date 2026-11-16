@@ -1,5 +1,9 @@
 # Live Trading
 
+See [Adaptive Trading](docs/adaptive-trading.md) for the shared PAPER/LIVE policy,
+Supabase schema, version approval/rollback, analytics and validation evidence.
+This task changed source/config only; the operator still controls worker startup.
+
 The project now hosts the engines in ASP.NET Core background services. HTTP
 startup requires `Api__Key`; diagnostic/export modes below still exit without
 starting HTTP or workers. See [Ubuntu deployment](DEPLOY_UBUNTU.md) for Docker,
@@ -8,24 +12,50 @@ state/database migration and monitoring. Compose overrides live to off unless
 
 Live is enabled in appsettings.json. One worker manages multiple USDT perpetual
 positions in Hedge mode, with at most one bot position per symbol. `Live:MaxOpenPositions=0`
-removes the overall count limit; a positive value sets an optional bot-position limit.
-Manual positions and orders on other symbols do not block entries. A symbol with
-any existing position or open order is skipped, without modifying manual SL/TP.
+uses `Risk:MaxOpenPositions` (currently 3); a positive value sets the live limit.
+Untracked/manual positions or orders block new entries because their aggregate
+risk is unknown. They are not modified by the bot. A symbol with
+any existing position or open order is skipped.
 Do not manually add to or change a bot-managed symbol: exchange quantity/side
 must still match its saved state.
 
-Each entry reads current available USDT margin. Quantity is the smaller of:
-- the `Risk:RiskPerTradePercent` budget divided by ATR stop distance plus estimated
+Each entry reads wallet/equity, daily income, actual fees and available USDT margin.
+Shared planning uses the smaller of wallet/equity as capital. Quantity respects:
+- the `Live:RiskPerTradePercent` budget (2% in appsettings; falls back to
+  `Risk:RiskPerTradePercent` when unset) divided by ATR stop distance plus estimated
   entry/exit fees at the stop price;
 - the margin-funded quantity, using `Live:MaxMarginUsagePercent` (20% of current
   available margin) and reserving estimated entry/exit fees from `Risk:FeeRate`.
 
-This is dynamic sizing, not a fixed USDT amount or a daily loss cutoff. Leverage
+Daily loss, sampled equity drawdown, aggregate stop risk/notional, approved spread,
+loss cooldown, persistent kill switch and API/pending-order circuits also gate entry. Leverage
 is selected automatically and capped by `Live:MaxLeverage` and the exchange limit;
 quantity is reduced when the cap cannot fund the original risk-sized quantity.
+Paper keeps its separate `Risk:RiskPerTradePercent` setting (0.5% in appsettings).
+The live budget limits estimated stop loss including fees, not actual loss under
+slippage or gaps. A 2% budget does not guarantee every exchange minimum can be met.
 Set `Live:AutoLeverage=false` to use `Live:Leverage` instead. Rounded quantities
 must meet exchange minimums. TP distance must exceed estimated trading fees;
 funding, real slippage and fee-tier differences can still reduce net profit.
+
+Before sizing, live and normal ATR/AI paper plans share protection validation:
+- SL is at least one price tick beyond the extreme of all closed post-breakout
+  retest candles, or farther if the ATR stop requires it. A stop beyond
+  `Risk:MaximumStopAtrMultiplier` (3 ATR) rejects the setup instead of moving SL
+  inside the retest structure. Multi-timeframe mode also uses the 15m setup swing
+  and configured ATR structure buffer.
+- Default TP uses the final outward-rounded stop distance. Explicit AI targets
+  still have to pass the protection checks.
+- Full-position net reward at TP divided by stop loss including entry/exit fees
+  must reach `Risk:MinimumNetRewardRiskRatio` (1.5). This uses `Risk:FeeRate` and
+  signal prices; funding, actual slippage and latency remain outside this gate.
+  It is an economic entry requirement, not a probability or guaranteed payoff.
+  Dynamic management also checks the weighted staged TP payoff after costs.
+  The explicit paper fixed-percent SL/TP test mode retains its previous rules.
+
+`LIVE SKIPPED` includes the rejected protection rule. Accepted sizing logs and
+entry journal records include the estimated net reward/risk ratio. These changes
+apply to new entries; saved positions keep their existing exchange protection.
 
 Signals require breakout/retest, volume/body/RSI filters, and aligned closed
 30m/1h trends on 5m entry candles. Retest reconfirms both trends and candle direction; forming/future
@@ -47,9 +77,11 @@ not a parameter optimized on backtests. AI decisions do not control live entries
 
 Time-based exits have been removed from both live and paper execution.
 There is no `MaxHoldingMinutes` option; old values are ignored by this build.
-Bot-managed live positions remain open until the exchange SL or TP closes them.
-Restart the worker manually to load this build. Paper retains its configured
-partial-TP behavior and checks protection on 5m candles; only closed 5m candles
+Bot-managed live positions may be reduced at shared partial targets; break-even
+and trailing only tighten the native stop. Confirmed loss of the native SL can
+trigger an identity-checked emergency close. Versioned positions retain their
+entry configuration; old positions without context keep native protection.
+Restart the worker manually to load this build. Only closed 5m candles
 can trigger entries. Retest 5 bars is a 25-minute window; cooldown 12 bars is 1 hour.
 
 ## Check Before Restart
@@ -101,8 +133,9 @@ worker confirms the position and full-quantity SL/TP orders on BingX.
 - Native SL/TP executes on the exchange and closures are detected on subsequent
   fresh 5m updates. The worker does not send time-based closing orders.
   Orphan orders block reuse of their symbol; the bot never cancels unknown orders.
-- Live entries have no daily loss limit or aggregate risk cutoff. Several positions
-  can lose together. Available margin and exchange SL/TP checks remain active.
+- Live entries enforce daily loss, sampled account drawdown, aggregate risk and
+  exposure limits. These are entry gates; simultaneous losses, gaps and slippage
+  can still exceed the estimated stop budget.
 - State version 2 persists `Positions` independently. A version-1 `Position` is
   migrated on startup, preserving quantity, side, SL/TP and trade ID. Back up state
   before deployment; the old worker cannot read version 2 for rollback.
@@ -127,7 +160,8 @@ higher 1h input. ATR/EMA/volume/body columns with a 5m suffix also describe the
 Schema is preserved; do not combine older/newer trades without checking the
 running build, trade dates and strategy context.
 
-Live writes a separate append-only live_trade_events table in the configured
+Live writes the unified `trading_journal` with mode LIVE as well as the legacy
+append-only live_trade_events table in the configured
 persistence provider. Event IDs deduplicate writes across restarts. The journal
 contains entry_requested (schema version 2, explicit 5m/30m/1h timeframe labels,
 client ID, signal, reason, EntryCandles/MediumTrendCandles/HigherTrendCandles snapshots,
@@ -141,14 +175,17 @@ entry_requested is an intent, not proof of a fill. closed_observed uses detectio
 time, not actual fill time. Native closure reasons, fees and PnL must be read
 from exchange history and matched by position/order IDs; the raw history may
 contain other trades for that symbol in the queried time window. No guessed
-PnL or win rate is inserted. Empty history is recorded as unavailable before
-clearing the saved position when the exchange confirms that tracked symbol is flat.
+PnL or win rate is inserted. Managed closures require a matching position ID and
+realized/fee income before clearing saved state; missing data blocks reconciliation.
+Normalized outcomes stay unreconciled until the delayed ledger stability check.
 Unknown pending requests still require manual reconciliation as described above.
 
 Events are first saved in the JSON state outbox, then inserted into the DB.
 An entry is not sent unless its intent has been persisted. DB failure blocks
-further processing until recovery/restart, and the outbox is replayed before
+new entries until recovery/restart, and the outbox is replayed before
 pending-order checks. Keep the state file as well as the DB.
+An emergency close after a confirmed missing SL can persist to the local durable
+outbox without waiting for DB recovery; its pending ID keeps entry blocked.
 
 Inspect journal counts without starting the trading worker:
 

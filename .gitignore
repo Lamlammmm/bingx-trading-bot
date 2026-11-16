@@ -9,4 +9,10 @@ src/TradingBot.Worker/data/
 /data/
 artifacts/
 /migration/
+/releases/
+/backups/
+/deploy.lock
+/current-release.txt
+/current-image.txt
+/previous-image.txt
 src/TradingBot.Worker/exports/

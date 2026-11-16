@@ -10,6 +10,16 @@ namespace TradingBot.Tests;
 
 public sealed class LiveTradingEngineTests : IDisposable
 {
+    [Fact]
+    public async Task MultiTimeframeStrategyCanInitializeForLiveWithoutSendingOrders()
+    {
+        using var engine = new LiveTradingEngine(_candles, Options.Create(new StrategyOptions { UseMultiTimeframeAnalysis = true }),
+            Options.Create(new RiskOptions()), Options.Create(new LiveOptions { Enabled = true, StatePath = Path.Combine(_directory, "state.json") }), _executor, _contracts,
+            NullLogger<LiveTradingEngine>.Instance, _journal);
+        await engine.InitializeAsync(default);
+        Assert.True(engine.IsReady);
+        Assert.Equal(0, _executor.Writes);
+    }
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "live-test-" + Guid.NewGuid());
     private readonly FakeExecutor _executor = new();
     private readonly InMemoryCandleStore _candles = new();
@@ -18,6 +28,8 @@ public sealed class LiveTradingEngineTests : IDisposable
     private bool _autoLeverage;
     private int _positionLimit;
     private decimal _marginUsage = 100m;
+    private decimal? _liveRiskPerTradePercent;
+    private bool _macdEnabled;
 
     private LiveTradingEngine Create()
     {
@@ -26,28 +38,36 @@ public sealed class LiveTradingEngineTests : IDisposable
         return new LiveTradingEngine(_candles, Options.Create(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }),
             Options.Create(new RiskOptions { RiskPerTradePercent = 10m }),
             Options.Create(new LiveOptions { Enabled = true, AutoLeverage = _autoLeverage, MaxLeverage = 10,
+                RiskPerTradePercent = _liveRiskPerTradePercent,
                 MaxOpenPositions = _positionLimit, MaxMarginUsagePercent = _marginUsage,
-                StatePath = Path.Combine(_directory, "state.json") }),
+                StatePath = Path.Combine(_directory, "state.json"), Macd = new() { Enabled = _macdEnabled } }),
             _executor, _contracts, NullLogger<LiveTradingEngine>.Instance, _journal);
     }
 
     [Theory]
-    [InlineData("10", false, 1, false, "0.01", 20, 5, "0.15")]
+    [InlineData("10", false, 1, false, "0.01", 20, 5, "0.16")]
     [InlineData("0.1", false, 0, false, "0.01", 20, 0, "0")]
-    [InlineData("10", true, 1, false, "0.01", 20, 5, "0.15")]
-    [InlineData("10", false, 1, true, "0.01", 20, 3, "0.15")]
-    [InlineData("10", false, 1, true, "0.06", 20, 3, "0.15")]
+    [InlineData("10", true, 1, false, "0.01", 20, 5, "0.16")]
+    [InlineData("10", false, 1, true, "0.01", 20, 2, "0.16")]
+    [InlineData("10", false, 1, true, "0.06", 20, 2, "0.16")]
     [InlineData("10", false, 0, true, "0.20", 20, 0, "0")]
-    [InlineData("10", false, 1, true, "0.01", 2, 2, "0.15")]
-    [InlineData("100", false, 1, true, "0.01", 20, 3, "1.54")]
+    [InlineData("10", false, 1, true, "0.01", 2, 2, "0.16")]
+    [InlineData("100", false, 1, true, "0.01", 20, 2, "1.60")]
     [InlineData("0.1", false, 0, true, "0.01", 20, 0, "0")]
-    [InlineData("10", false, 1, false, "0.01", 20, 5, "0.15", "BTC-USDT", 2)]
+    [InlineData("10", false, 1, false, "0.01", 20, 5, "0.16", "BTC-USDT", 2)]
     [InlineData("0", false, 0, false, "0.01", 20, 0, "0", "BTC-USDT", 2)]
     [InlineData("10", false, 0, false, "0.01", 20, 0, "0", "SOL-USDT", 2)]
     [InlineData("10", false, 0, false, "0.01", 20, 0, "0", null, 2)]
+    [InlineData("10", false, 1, true, "0.01", 20, 1, "0.03", null, 0, "2")]
+    [InlineData("10", false, 0, true, "0.01", 20, 0, "0", null, 0, "0.5")]
+    [InlineData("10", false, 0, false, "0.01", 20, 0, "0", null, 0, null, true)]
     public async Task SmallBalanceEntryAndTimeoutAreHandled(string balance, bool timeout, int expectedOrders,
-        bool adaptive, string minimumQuantity, int exchangeMaximum, int expectedLeverage, string expectedQuantity, string? manualSymbol = null, int manualOrders = 0)
+        bool adaptive, string minimumQuantity, int exchangeMaximum, int expectedLeverage, string expectedQuantity, string? manualSymbol = null, int manualOrders = 0,
+        string? liveRiskPerTradePercent = null, bool macdEnabled = false)
     {
+        _macdEnabled = macdEnabled;
+        _liveRiskPerTradePercent = liveRiskPerTradePercent is null ? null
+            : decimal.Parse(liveRiskPerTradePercent, System.Globalization.CultureInfo.InvariantCulture);
         _executor.ManualSymbol = manualSymbol;
         _executor.ManualOrders = manualOrders;
         _executor.Balance = decimal.Parse(balance, System.Globalization.CultureInfo.InvariantCulture);
@@ -92,7 +112,7 @@ public sealed class LiveTradingEngineTests : IDisposable
                 new Candle(end, end.AddMinutes(5), 130m, 131m, 1m, 2m, 200m, true));
             await engine.ProcessAsync(new MarketUpdate("SOL-USDT", TimeFrame.FiveMinutes,
                 breakout), default);
-            var retest = new Candle(end, DateTimeOffset.UtcNow, 112m, 132m, 110m, 131m, 100m, true);
+            var retest = new Candle(end, DateTimeOffset.UtcNow, 110.1m, 112.5m, 110m, 112m, 100m, true);
             _candles.Upsert("SOL-USDT", TimeFrame.FiveMinutes, retest);
             var update = new MarketUpdate("SOL-USDT", TimeFrame.FiveMinutes, retest);
             foreach (var frame in new[] { TimeFrame.FifteenMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
@@ -123,6 +143,8 @@ public sealed class LiveTradingEngineTests : IDisposable
                     Assert.All(context.RootElement.GetProperty(property).EnumerateArray(), candle =>
                         Assert.True(candle.GetProperty("CloseTime").GetDateTimeOffset() <= signalTime));
                 var payload = context.RootElement;
+                Assert.Equal(_executor.Balance * (_liveRiskPerTradePercent ?? 10m) / 100m,
+                    payload.GetProperty("RiskBudget").GetDecimal());
                 var estimatedLoss = payload.GetProperty("Quantity").GetDecimal() *
                     (payload.GetProperty("StopDistance").GetDecimal() +
                      (payload.GetProperty("Signal").GetProperty("EntryPrice").GetDecimal() +
@@ -138,6 +160,18 @@ public sealed class LiveTradingEngineTests : IDisposable
             await Assert.ThrowsAsync<InvalidOperationException>(() => restarted.InitializeAsync(default));
             Assert.Equal(1, _executor.OpenOrdersSent);
         }
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(100)]
+    public async Task InvalidLiveRiskOverridePreventsStartup(int riskPercent)
+    {
+        _liveRiskPerTradePercent = riskPercent;
+        using var engine = Create();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => engine.InitializeAsync(default));
+        Assert.Equal(0, _executor.Writes);
     }
 
     [Fact]
@@ -399,7 +433,7 @@ public sealed class LiveTradingEngineTests : IDisposable
             foreach (var symbol in new[] { "SOL-USDT", "ETH-USDT" })
             {
                 _executor.TimeoutOnOpen = timeoutSecond && symbol == "ETH-USDT";
-                var retest = new Candle(end, DateTimeOffset.UtcNow, 112m, 132m, 110m, 131m, 100m, true);
+                var retest = new Candle(end, DateTimeOffset.UtcNow, 110.1m, 112.5m, 110m, 112m, 100m, true);
                 _candles.Upsert(symbol, TimeFrame.FiveMinutes, retest);
                 var update = new MarketUpdate(symbol, TimeFrame.FiveMinutes, retest);
                 if (_executor.TimeoutOnOpen) await Assert.ThrowsAsync<TimeoutException>(() => engine.ProcessAsync(update, default));
@@ -546,7 +580,7 @@ public sealed class LiveTradingEngineTests : IDisposable
             LastQuantity = quantity;
             if (TimeoutOnOpen) throw new TimeoutException();
             BotSymbols.Add(symbol);
-            if (DeductMargin) Balance -= quantity * 131m * (1m / LastLeverage + 0.001m);
+            if (DeductMargin) Balance -= quantity * 112m * (1m / LastLeverage + 0.001m);
             return Task.FromResult(new LiveOrderReceipt(100m, "{\"orderId\":\"test\"}"));
         }
         public Task<LiveOrderReceipt> CloseMarketPositionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken token)

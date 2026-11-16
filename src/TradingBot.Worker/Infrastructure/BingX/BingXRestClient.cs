@@ -8,6 +8,16 @@ namespace TradingBot.Worker.Infrastructure.BingX;
 
 public sealed class BingXRestClient(HttpClient httpClient, ILogger<BingXRestClient> logger) : IBingXMarketClient
 {
+    public async Task<decimal?> GetSpreadBasisPointsAsync(string symbol, CancellationToken cancellationToken)
+    {
+        using var document = await GetDocumentAsync($"openApi/swap/v2/quote/depth?symbol={Uri.EscapeDataString(symbol)}&limit=5", cancellationToken);
+        var data = document.RootElement.GetProperty("data");
+        var time = DateTimeOffset.FromUnixTimeMilliseconds(data.GetProperty("T").GetInt64());
+        if (DateTimeOffset.UtcNow - time > TimeSpan.FromSeconds(30) || time > DateTimeOffset.UtcNow.AddSeconds(10)) return null;
+        var bid = decimal.Parse(data.GetProperty("bids")[0][0].ToString(), CultureInfo.InvariantCulture);
+        var ask = decimal.Parse(data.GetProperty("asks")[0][0].ToString(), CultureInfo.InvariantCulture);
+        return bid <= 0m || ask < bid ? null : (ask - bid) / ((ask + bid) / 2m) * 10_000m;
+    }
     public async Task<IReadOnlyList<Candle>> GetCandlesAsync(string symbol, TimeFrame timeFrame, int limit, CancellationToken cancellationToken)
     {
         var interval = timeFrame switch
@@ -38,7 +48,8 @@ public sealed class BingXRestClient(HttpClient httpClient, ILogger<BingXRestClie
         var url = $"openApi/swap/v2/quote/contracts?symbol={Uri.EscapeDataString(symbol)}";
         using var document = await GetDocumentAsync(url, cancellationToken);
         var item = document.RootElement.GetProperty("data");
-        if (item.ValueKind == JsonValueKind.Array) item = item.EnumerateArray().FirstOrDefault();
+        if (item.ValueKind == JsonValueKind.Array) item = item.EnumerateArray().FirstOrDefault(row =>
+            row.TryGetProperty("symbol", out var name) && string.Equals(name.GetString(), symbol, StringComparison.OrdinalIgnoreCase));
         if (item.ValueKind != JsonValueKind.Object) return null;
         return new ContractInfo(item.GetProperty("symbol").GetString() ?? symbol,
             GetDecimal(item, "quantityPrecision"), GetDecimal(item, "pricePrecision"),

@@ -1,5 +1,9 @@
 # Deploy bot trên Ubuntu
 
+Hướng dẫn từng bước từ cài Docker đến kích hoạt workflow GitHub Actions nằm trong
+[CI_CD_UBUNTU.md](CI_CD_UBUNTU.md). Dùng `/opt/bingx-trading-bot` và
+`COMPOSE_PROJECT_NAME=bingx-bot` để deploy thủ công và CD dùng chung volume.
+
 Ứng dụng ASP.NET Core .NET 8 chạy market data và giao dịch bằng `BackgroundService`.
 Bot tiếp tục chạy khi đóng SSH; HTTP chỉ để theo dõi. Giữ một instance cho mỗi
 tài khoản BingX, không scale nhiều replica cùng tài khoản.

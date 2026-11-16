@@ -1,0 +1,23 @@
+purpose:
+  stands_in_for: BingX signed USDT Hedge position/order/income responses and controlled management failures.
+  unblocks: Run the production LiveTradingEngine and BingXLiveExecutor over real local HTTP without exchange credentials.
+assumptions:
+  - id: managed-partial-and-protection
+    status: supported
+    claim: The caller confirms a partial market fill and exact remaining position before replacing the saved SL/TP IDs with STOP_ON_FAILURE.
+    reason: The mock follows official BingX API reference fields; the race/failure injections are synthetic. Owner mock lookup was skipped because Postman CLI is signed out and status is unsupported.
+    verification: >-
+      On 2026-11-06 eight HTTP scenarios passed with the production executor and Live engine on localhost.
+      They covered LONG/SHORT staged partials and restart deduplication, close timeout after write, partial fill,
+      stop timeout, TP rejection, confirmed SL cancellation and replacement failure with emergency close, and an unknown manual order.
+      Control state and 242 simulation requests confirmed the modeled calls. A separate unit test covers database outage
+      during emergency protection. On 2026-11-08 all eight scenarios passed again with MACD enabled and only 70 initial
+      closed candles, below the default warm-up of 130. The macd-management-20261108 loopback run recorded 242 requests.
+      Both runs used synthetic credentials. Live exchange fills, races and idempotency retention remain unverified.
+    source: src/TradingBot.Worker/Infrastructure/Live/LiveTradingEngine.Advanced.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.Management.cs; tests/TradingBot.ExecutionSmoke/LiveManagementSmoke.cs
+    updated_at: "2026-11-08"
+fingerprints:
+  - id: macd-management-20261108
+    date: "2026-11-08"
+    commit: db44904e830bbdfeb283570f449b7131f9530470 (dirty working tree with MACD changes)
+    cli: "1.73.0"

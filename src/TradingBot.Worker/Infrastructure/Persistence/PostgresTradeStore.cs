@@ -9,6 +9,7 @@ namespace TradingBot.Worker.Infrastructure.Persistence;
 
 public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : ITradeStore, ILiveTradeJournal
 {
+    public ITradingResearchStore Research => new SqlTradingResearchStore(() => new NpgsqlConnection(_connectionString));
     private readonly string _connectionString = NormalizeConnectionString(options.Value.ConnectionString
         ?? throw new InvalidOperationException("Persistence:ConnectionString is required when Persistence:Provider is Postgres."));
 
@@ -114,6 +115,9 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             ALTER TABLE account_state ADD COLUMN IF NOT EXISTS total_net_pnl NUMERIC NOT NULL DEFAULT 0;
             """;
         await alterAccountState.ExecuteNonQueryAsync(cancellationToken);
+        await using var riskControlsColumn = connection.CreateCommand();
+        riskControlsColumn.CommandText = "ALTER TABLE account_state ADD COLUMN IF NOT EXISTS risk_controls TEXT NULL;";
+        await riskControlsColumn.ExecuteNonQueryAsync(cancellationToken);
 
         await using var createOpenPositions = connection.CreateCommand();
         createOpenPositions.CommandText = """
@@ -142,6 +146,9 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             UPDATE open_positions SET initial_quantity = quantity WHERE initial_quantity IS NULL;
             """;
         await alterOpenPositions.ExecuteNonQueryAsync(cancellationToken);
+        await using var positionMetricsColumn = connection.CreateCommand();
+        positionMetricsColumn.CommandText = "ALTER TABLE open_positions ADD COLUMN IF NOT EXISTS metrics TEXT NULL;";
+        await positionMetricsColumn.ExecuteNonQueryAsync(cancellationToken);
 
         await using var createClosedTrades = connection.CreateCommand();
         createClosedTrades.CommandText = """
@@ -184,6 +191,35 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS body_ratio_5m NUMERIC NULL;
             """;
         await alterClosedTrades.ExecuteNonQueryAsync(cancellationToken);
+        await using var tradeMetricsColumn = connection.CreateCommand();
+        tradeMetricsColumn.CommandText = "ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS metrics TEXT NULL;";
+        await tradeMetricsColumn.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+
+    public async Task CommitPaperStateWithJournalAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, IReadOnlyCollection<TradingJournalEvent> events, CancellationToken token)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(token);
+        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(token);
+        await SaveAccountStateAsync(account, connection, transaction, token);
+        await SaveOpenPositionsAsync(positions, connection, transaction, token);
+        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, token);
+        foreach (var entry in events) await SqlTradingResearchStore.AppendInTransactionAsync(connection, transaction, entry, token);
+        await transaction.CommitAsync(token);
+    }
+
+    public async Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, CancellationToken cancellationToken)
+    {
+        await using var connection = new NpgsqlConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveAccountStateAsync(account, connection, transaction, cancellationToken);
+        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
+        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken)
@@ -192,7 +228,7 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT balance, balance_date, realized_pnl_today, total_wins, total_losses, total_net_pnl FROM account_state WHERE id = 1;";
+        command.CommandText = "SELECT balance, balance_date, realized_pnl_today, total_wins, total_losses, total_net_pnl, risk_controls FROM account_state WHERE id = 1;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken)) return null;
 
@@ -202,29 +238,38 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             reader.GetDecimal(2),
             reader.GetInt32(3),
             reader.GetInt32(4),
-            reader.GetDecimal(5));
+            reader.GetDecimal(5), reader.IsDBNull(6) ? null : JsonSerializer.Deserialize<RiskControlState>(reader.GetString(6)));
     }
 
     public async Task SaveAccountStateAsync(AccountState state, CancellationToken cancellationToken)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveAccountStateAsync(state, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
 
+    private static async Task SaveAccountStateAsync(AccountState state, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
-            INSERT INTO account_state (id, balance, balance_date, realized_pnl_today, total_wins, total_losses, total_net_pnl)
-            VALUES (1, @balance, @balanceDate, @realizedPnlToday, @totalWins, @totalLosses, @totalNetPnl)
+            INSERT INTO account_state (id, balance, balance_date, realized_pnl_today, total_wins, total_losses, total_net_pnl, risk_controls)
+            VALUES (1, @balance, @balanceDate, @realizedPnlToday, @totalWins, @totalLosses, @totalNetPnl, @riskControls)
             ON CONFLICT (id) DO UPDATE SET
                 balance = excluded.balance,
                 balance_date = excluded.balance_date,
                 realized_pnl_today = excluded.realized_pnl_today,
                 total_wins = excluded.total_wins,
                 total_losses = excluded.total_losses,
-                total_net_pnl = excluded.total_net_pnl;
+                total_net_pnl = excluded.total_net_pnl, risk_controls = excluded.risk_controls;
             """;
         command.Parameters.AddWithValue("balance", state.Balance);
         command.Parameters.AddWithValue("balanceDate", state.BalanceDate.ToDateTime(TimeOnly.MinValue));
         command.Parameters.AddWithValue("realizedPnlToday", state.RealizedPnlToday);
+        command.Parameters.AddWithValue("riskControls", JsonSerializer.Serialize(state.RiskControls));
         command.Parameters.AddWithValue("totalWins", state.TotalWins);
         command.Parameters.AddWithValue("totalLosses", state.TotalLosses);
         command.Parameters.AddWithValue("totalNetPnl", state.TotalNetPnl);
@@ -262,7 +307,7 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
                    opened_at, closed_at, rsi_5m::text, rsi_15m::text, rsi_1h::text,
                    atr_5m::text, ema_fast_5m::text, ema_slow_5m::text,
                    volume_ratio_5m::text, body_ratio_5m::text, confidence::text,
-                   hour_of_day_utc, day_of_week_utc
+                   hour_of_day_utc, day_of_week_utc, metrics
             FROM closed_trades ORDER BY id;
             """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -285,7 +330,7 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
                 decimal.Parse(reader.GetString(5), invariant), decimal.Parse(reader.GetString(6), invariant),
                 decimal.Parse(reader.GetString(7), invariant), decimal.Parse(reader.GetString(8), invariant),
                 reader.GetString(9), reader.GetString(10), reader.GetFieldValue<DateTimeOffset>(11),
-                reader.GetFieldValue<DateTimeOffset>(12));
+                reader.GetFieldValue<DateTimeOffset>(12), Metrics: reader.IsDBNull(24) ? null : JsonSerializer.Deserialize<TradeMetrics>(reader.GetString(24)));
             yield return new StoredPaperTrade(reader.GetInt64(0), trade, features);
         }
     }
@@ -295,7 +340,7 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
-        command.CommandText = "SELECT symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken, initial_quantity, realized_partial_pnl FROM open_positions;";
+        command.CommandText = "SELECT symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken, initial_quantity, realized_partial_pnl, metrics FROM open_positions;";
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         var positions = new List<PaperPosition>();
         while (await reader.ReadAsync(cancellationToken))
@@ -307,7 +352,7 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
                 reader.GetDecimal(6), reader.GetDecimal(7), reader.GetFieldValue<DateTimeOffset>(8),
                 featuresJson is null ? null : JsonSerializer.Deserialize<TradeFeatures>(featuresJson),
                 reader.IsDBNull(10) ? stopLoss : reader.GetDecimal(10), reader.GetBoolean(11),
-                reader.IsDBNull(12) ? reader.GetDecimal(2) : reader.GetDecimal(12), reader.GetDecimal(13)));
+                reader.IsDBNull(12) ? reader.GetDecimal(2) : reader.GetDecimal(12), reader.GetDecimal(13), reader.IsDBNull(14) ? null : JsonSerializer.Deserialize<PositionMetrics>(reader.GetString(14))));
         }
         return positions;
     }
@@ -316,7 +361,14 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
     {
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task SaveOpenPositionsAsync(IReadOnlyCollection<PaperPosition> positions, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
         await using (var delete = connection.CreateCommand())
         {
             delete.Transaction = transaction;
@@ -330,9 +382,10 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             insert.Transaction = transaction;
             insert.CommandText = """
                 INSERT INTO open_positions
-                    (symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken, initial_quantity, realized_partial_pnl)
-                VALUES (@symbol, @direction, @quantity, @entryPrice, @stopLoss, @takeProfit, @riskAmount, @entryFee, @openedAt, @entryFeatures, @initialStopLoss, @partialTaken, @initialQuantity, @realizedPartialPnl);
+                    (symbol, direction, quantity, entry_price, stop_loss, take_profit, risk_amount, entry_fee, opened_at, entry_features, initial_stop_loss, partial_taken, initial_quantity, realized_partial_pnl, metrics)
+                VALUES (@symbol, @direction, @quantity, @entryPrice, @stopLoss, @takeProfit, @riskAmount, @entryFee, @openedAt, @entryFeatures, @initialStopLoss, @partialTaken, @initialQuantity, @realizedPartialPnl, @metrics);
                 """;
+            insert.Parameters.AddWithValue("metrics", JsonSerializer.Serialize(position.Metrics));
             insert.Parameters.AddWithValue("symbol", position.Symbol);
             insert.Parameters.AddWithValue("direction", position.Direction.ToString());
             insert.Parameters.AddWithValue("quantity", position.Quantity);
@@ -349,23 +402,31 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             insert.Parameters.AddWithValue("realizedPartialPnl", position.RealizedPartialPnl);
             await insert.ExecuteNonQueryAsync(cancellationToken);
         }
-        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task RecordClosedTradeAsync(ClosedTrade trade, CancellationToken cancellationToken)
     {
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
+        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
+        await RecordClosedTradeAsync(trade, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
 
+    private static async Task RecordClosedTradeAsync(ClosedTrade trade, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    {
         await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO closed_trades
                 (symbol, direction, quantity, entry_price, exit_price, stop_loss, take_profit, net_pnl, exit_reason, source, opened_at, closed_at,
-                 rsi_5m, rsi_15m, rsi_1h, atr_5m, ema_fast_5m, ema_slow_5m, volume_ratio_5m, body_ratio_5m, confidence, hour_of_day_utc, day_of_week_utc)
+                 rsi_5m, rsi_15m, rsi_1h, atr_5m, ema_fast_5m, ema_slow_5m, volume_ratio_5m, body_ratio_5m, confidence, hour_of_day_utc, day_of_week_utc, metrics)
             VALUES
                 (@symbol, @direction, @quantity, @entryPrice, @exitPrice, @stopLoss, @takeProfit, @netPnl, @exitReason, @source, @openedAt, @closedAt,
-                 @rsi5m, @rsi15m, @rsi1h, @atr5m, @emaFast5m, @emaSlow5m, @volumeRatio5m, @bodyRatio5m, @confidence, @hourOfDayUtc, @dayOfWeekUtc);
+                 @rsi5m, @rsi15m, @rsi1h, @atr5m, @emaFast5m, @emaSlow5m, @volumeRatio5m, @bodyRatio5m, @confidence, @hourOfDayUtc, @dayOfWeekUtc, @metrics);
             """;
+        command.Parameters.AddWithValue("metrics", JsonSerializer.Serialize(trade.Metrics));
         command.Parameters.AddWithValue("symbol", trade.Symbol);
         command.Parameters.AddWithValue("direction", trade.Direction.ToString());
         command.Parameters.AddWithValue("quantity", trade.Quantity);

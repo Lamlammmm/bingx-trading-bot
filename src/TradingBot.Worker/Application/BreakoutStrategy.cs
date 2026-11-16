@@ -90,8 +90,13 @@ public sealed class BreakoutStrategy(IOptions<StrategyOptions> options) : ITradi
                         current.OpenTime - lastSignalTime < barDuration * _options.SignalCooldownBars) return null;
 
                     _lastSignalTimeBySymbol[symbol] = current.OpenTime;
+                    var retestCandles = entryCandles.Where(candle => candle.OpenTime > pending.DetectedAt).ToArray();
+                    var invalidationPrice = pending.Direction == TradeDirection.Long
+                        ? retestCandles.Min(candle => candle.Low)
+                        : retestCandles.Max(candle => candle.High);
                     return new StrategySignal(symbol, pending.Direction, current.CloseTime, current.Close, atr,
-                        $"{pending.Reason}; level retested and held; entry distance={Math.Abs(current.Close - pending.Level):0.########}; ATR before breakout={pending.AtrBeforeBreakout:0.########}; closed medium/higher trends and candle direction reconfirmed");
+                        $"{pending.Reason}; level retested and held; entry distance={Math.Abs(current.Close - pending.Level):0.########}; ATR before breakout={pending.AtrBeforeBreakout:0.########}; closed medium/higher trends and candle direction reconfirmed",
+                        InvalidationPrice: invalidationPrice);
                 }
                 // otherwise: still waiting, keep pending for another bar within the confirmation window
                 return null;
