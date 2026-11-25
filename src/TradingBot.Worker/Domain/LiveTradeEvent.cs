@@ -6,7 +6,8 @@ public sealed record LiveTradeEvent(string EventId, string TradeId, string Symbo
 public sealed record LiveOrderReceipt(decimal? AveragePrice, string ResponseJson);
 
 public sealed record LiveAccountSnapshot(decimal WalletBalance, decimal Equity, decimal AvailableMargin,
-    decimal DayStartBalance, decimal NetTradingIncomeToday, decimal TakerFeeRate = 0.0005m, decimal ExternalIncomeToday = 0m);
+    decimal DayStartBalance, decimal NetTradingIncomeToday, decimal TakerFeeRate = 0.0005m, decimal ExternalIncomeToday = 0m,
+    decimal UsedMargin = 0m, decimal FrozenMargin = 0m);
 
 public sealed record LiveIncomeSnapshot(decimal NetPnl, decimal FundingIncome, decimal TradingFees, int Records,
     bool HasRealizedPnl = false, bool HasTradingFee = false, decimal RealizedPnl = 0m);
@@ -17,6 +18,11 @@ public sealed record LiveManagedPosition(string PositionId, string Symbol, Trade
 public sealed record LivePositionSnapshot(string PositionId, string Symbol, TradeDirection Direction, decimal Quantity, decimal EntryPrice);
 
 public sealed class LiveProtectionReplacementException(string message) : InvalidOperationException(message);
+
+public sealed class BingXOrderRejected(int code, string message) : InvalidOperationException(message)
+{
+    public int Code { get; } = code;
+}
 
 public sealed record LiveOrderFill(string OrderId, string ClientOrderId, string Symbol, string Side,
     string PositionSide, string Status, decimal ExecutedQuantity, decimal AveragePrice);

@@ -188,7 +188,7 @@ public sealed class SqlTradingResearchStore(Func<DbConnection> openConnection) :
         if ((action == "APPROVE" && registration.Status != "VALIDATED") ||
             (action == "ROLLBACK" && registration.Status != "APPROVED"))
             throw new InvalidOperationException("Promotion needs validation; rollback needs a previously approved version.");
-        if (action == "APPROVE") TradingPolicyRuntime.ValidateEvidence(registration);
+        if (action == "APPROVE") TradingPolicyRuntime.ValidateEvidence(registration, expectedActiveVersion);
         var approved = registration with { Status = "APPROVED", ApprovedBy = approvedBy, PreviousVersion = expectedActiveVersion,
             Snapshot = registration.Snapshot with { ApprovalStatus = "APPROVED", EffectiveAt = DateTimeOffset.UtcNow } };
         command.CommandText = "UPDATE strategy_active SET version=@version WHERE trading_mode=@mode AND version=@expected";

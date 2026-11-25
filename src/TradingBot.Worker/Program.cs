@@ -14,6 +14,17 @@ using TradingBot.Worker.Infrastructure.OpenAI;
 using TradingBot.Worker.Infrastructure.PaperTrading;
 using TradingBot.Worker.Infrastructure.Persistence;
 
+var preflight = args.Contains("--preflight", StringComparer.OrdinalIgnoreCase);
+if (args.Any(arg => arg.StartsWith("--preflight=", StringComparison.OrdinalIgnoreCase)))
+    throw new InvalidOperationException("Use --preflight without a value.");
+if (preflight && args.Any(arg =>
+    arg.StartsWith("--trading-", StringComparison.OrdinalIgnoreCase) ||
+    arg.StartsWith("--strategy-", StringComparison.OrdinalIgnoreCase) ||
+    arg.Equals("--export-trade-analysis", StringComparison.OrdinalIgnoreCase) ||
+    arg.Equals("--journal-status", StringComparison.OrdinalIgnoreCase) ||
+    arg.Equals("--export-live-journal", StringComparison.OrdinalIgnoreCase)))
+    throw new InvalidOperationException("--preflight must run separately from trading, strategy and journal commands.");
+
 var builder = WebApplication.CreateBuilder(args);
 var seqUrl = builder.Configuration["Seq:Url"];
 builder.Logging.ClearProviders();
@@ -34,7 +45,9 @@ Log.Logger = loggerConfiguration.CreateLogger();
 builder.Logging.AddSerilog(Log.Logger, dispose: true);
 builder.Services.Configure<BotOptions>(builder.Configuration.GetSection(BotOptions.SectionName));
 builder.Services.Configure<BingXOptions>(builder.Configuration.GetSection(BingXOptions.SectionName));
-builder.Services.Configure<StrategyOptions>(builder.Configuration.GetSection(StrategyOptions.SectionName));
+builder.Services.AddOptions<StrategyOptions>().BindConfiguration(StrategyOptions.SectionName)
+    .Validate(options => !options.UseAdaptiveCurrentEntries || options.UseMultiTimeframeAnalysis,
+        "Adaptive Current requires Strategy:UseMultiTimeframeAnalysis.").ValidateOnStart();
 builder.Services.Configure<RiskOptions>(builder.Configuration.GetSection(RiskOptions.SectionName));
 builder.Services.AddOptions<PaperTradingOptions>().BindConfiguration(PaperTradingOptions.SectionName)
     .Validate(options => options.Macd.IsValid, "PaperTrading:Macd requires Fast > 0, Slow > Fast and Signal > 0.")
@@ -45,6 +58,7 @@ builder.Services.AddOptions<LiveOptions>().BindConfiguration(LiveOptions.Section
     .Validate(options => options.Macd.IsValid, "Live:Macd requires Fast > 0, Slow > Fast and Signal > 0.")
     .ValidateOnStart();
 builder.Services.Configure<AdaptiveOptions>(builder.Configuration.GetSection(AdaptiveOptions.SectionName));
+builder.Services.Configure<TradingFrequencyOptions>(builder.Configuration.GetSection(TradingFrequencyOptions.SectionName));
 builder.Services.PostConfigure<LiveOptions>(options =>
     options.StatePath = Path.GetFullPath(options.StatePath, builder.Environment.ContentRootPath));
 builder.Services.PostConfigure<PersistenceOptions>(options =>
@@ -131,6 +145,13 @@ builder.Services.AddSingleton<ITradingResearchStore>(provider => provider.GetReq
     _ => throw new InvalidOperationException("The trade store must support the unified journal.")
 });
 builder.Services.AddSingleton<TradingGovernance>();
+builder.Services.AddSingleton<Func<SignalScanStore>>(provider => () => provider.GetRequiredService<ITradeStore>() switch
+{
+    PostgresTradeStore postgres => postgres.SignalScans,
+    SqliteTradeStore sqlite => sqlite.SignalScans,
+    _ => throw new InvalidOperationException("The trade store does not support signal diagnostics.")
+});
+builder.Services.AddSingleton<SignalDiagnostics>();
 builder.Services.AddSingleton<IRiskManager, RiskManager>();
 builder.Services.AddSingleton<IBingXMarketStream, BingXWebSocketClient>();
 builder.Services.AddSingleton<PaperTradingEngine>();
@@ -140,12 +161,30 @@ builder.Services.AddSingleton<BotRuntimeState>();
 builder.Services.AddHealthChecks().AddCheck<BotReadinessHealthCheck>("bot", tags: new[] { "ready" });
 if (builder.Configuration.GetValue("Bot:Enabled", true))
 {
+    builder.Services.AddHostedService(provider => provider.GetRequiredService<SignalDiagnostics>());
     builder.Services.AddHostedService<BingXMarketDataWorker>();
     builder.Services.AddHostedService<TradingWorker>();
     builder.Services.AddHostedService<TradingAnalyticsWorker>();
+    ShadowTradingWorker.Add(builder.Services);
 }
 
 using var host = builder.Build();
+if (preflight)
+{
+    var executor = host.Services.GetRequiredService<ILiveExecutor>();
+    using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(45));
+    await executor.ValidatePositionModeAsync(deadline.Token);
+    var account = await executor.GetAccountSnapshotAsync(deadline.Token);
+    var positions = await executor.GetOpenPositionCountAsync(deadline.Token);
+    var orders = await executor.GetOpenOrderCountAsync(deadline.Token);
+    Console.WriteLine("PREFLIGHT READ-ONLY " + System.Text.Json.JsonSerializer.Serialize(new
+    {
+        HedgeMode = true, account.WalletBalance, account.Equity, account.AvailableMargin, account.DayStartBalance,
+        account.UsedMargin, account.FrozenMargin, account.NetTradingIncomeToday, account.ExternalIncomeToday, account.TakerFeeRate,
+        OpenPositions = positions, OpenOrders = orders
+    }));
+    return;
+}
 if (args.Any(a => a.StartsWith("--trading-", StringComparison.Ordinal) || a.StartsWith("--strategy-", StringComparison.Ordinal)))
 {
     if (await TradingResearchCommands.RunAsync(host.Services.GetRequiredService<TradingGovernance>(), args)) return;
@@ -249,16 +288,6 @@ if (args.Contains("--journal-status", StringComparer.OrdinalIgnoreCase) ||
     }
     return;
 }
-if (args.Contains("--preflight", StringComparer.OrdinalIgnoreCase))
-{
-    var executor = host.Services.GetRequiredService<ILiveExecutor>();
-    await executor.ValidatePositionModeAsync(CancellationToken.None);
-    var balance = await executor.GetAvailableBalanceUsdtAsync(CancellationToken.None);
-    var positions = await executor.GetOpenPositionCountAsync(CancellationToken.None);
-    var orders = await executor.GetOpenOrderCountAsync(CancellationToken.None);
-    Console.WriteLine($"PREFLIGHT READ-ONLY | USDT={balance} | positions={positions} | openOrders={orders} | Hedge mode verified");
-    return;
-}
 var apiKey = host.Configuration["Api:Key"];
 if (string.IsNullOrWhiteSpace(apiKey))
     throw new InvalidOperationException("Set Api:Key (Api__Key environment variable) before starting the HTTP host.");
@@ -296,6 +325,9 @@ host.MapGet("/api/bot/status", (BotRuntimeState state, ICandleStore candles,
                 .LastOrDefault(candle => candle.IsClosed)?.CloseTime
         }).ToArray()
     }));
+host.MapSignalDiagnostics();
+host.MapLiveTradingMetrics();
+ShadowTradingWorker.MapPerformance(host);
 await host.RunAsync();
 
 public partial class Program { }

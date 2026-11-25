@@ -1,5 +1,9 @@
 # Live Trading
 
+See the [adaptive Current and frequency rollout decision](docs/live-trading-frequency.md) before changing the Current entry policy.
+
+For the current IIS rollout, follow the [readiness decision and approval sequence](docs/live-trading-readiness.md). The deployed IIS directory may already have Live flags set, so opening a health URL can start the worker. Run CLI preflight against the staged binary instead.
+
 See [Adaptive Trading](docs/adaptive-trading.md) for the shared PAPER/LIVE policy,
 Supabase schema, version approval/rollback, analytics and validation evidence.
 This task changed source/config only; the operator still controls worker startup.
@@ -24,8 +28,10 @@ Shared planning uses the smaller of wallet/equity as capital. Quantity respects:
 - the `Live:RiskPerTradePercent` budget (2% in appsettings; falls back to
   `Risk:RiskPerTradePercent` when unset) divided by ATR stop distance plus estimated
   entry/exit fees at the stop price;
-- the margin-funded quantity, using `Live:MaxMarginUsagePercent` (20% of current
-  available margin) and reserving estimated entry/exit fees from `Risk:FeeRate`.
+- the margin-funded quantity. The advanced Live path applies `Live:MaxMarginUsagePercent`
+  to current available margin for the individual entry and to account capital for the
+  combined margin cap. Existing used and frozen USDT margin reduce the headroom under
+  that cap. The plan also reserves estimated entry/exit fees.
 
 Daily loss, sampled equity drawdown, aggregate stop risk/notional, approved spread,
 loss cooldown, persistent kill switch and API/pending-order circuits also gate entry. Leverage
@@ -92,9 +98,12 @@ Run this from the repository root. It does not start the trading loop or place o
 dotnet artifacts/ubuntu-entry-filter-ready/TradingBot.Worker.dll --contentRoot "$PWD/src/TradingBot.Worker" --environment Development --preflight
 ```
 
-Preflight checks credentials, Hedge mode, available USDT, open positions and open
-orders. It does not prove that an actual order or attached SL/TP will be accepted.
-The full startup also validates local state and exchange protection.
+The staged preflight checks credentials, Hedge mode, the account snapshot with
+wallet, equity, margin, daily ledger and fee rate, and counts open positions and
+orders. Use `--preflight` without a value and separately from trading, strategy
+and journal commands. It exits without starting workers. It does not prove that
+an actual order or attached SL/TP will be accepted. The full startup also
+validates local state and exchange protection.
 
 ## Start
 

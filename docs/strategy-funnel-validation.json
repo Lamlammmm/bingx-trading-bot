@@ -1,0 +1,2870 @@
+{
+  "bySymbol": {
+    "ARB-USDT": {
+      "evaluations": 1609,
+      "marketCandleEvents": 1624,
+      "rejected": 1609
+    },
+    "AVAX-USDT": {
+      "evaluations": 1613,
+      "marketCandleEvents": 1624,
+      "rejected": 1613
+    },
+    "BNB-USDT": {
+      "evaluations": 1612,
+      "marketCandleEvents": 1624,
+      "rejected": 1612
+    },
+    "BR-USDT": {
+      "evaluations": 1606,
+      "marketCandleEvents": 1622,
+      "rejected": 1606
+    },
+    "BTC-USDT": {
+      "evaluations": 1614,
+      "marketCandleEvents": 1624,
+      "rejected": 1614
+    },
+    "BTW-USDT": {
+      "evaluations": 1610,
+      "marketCandleEvents": 1624,
+      "rejected": 1610
+    },
+    "CVC-USDT": {
+      "evaluations": 1610,
+      "marketCandleEvents": 1623,
+      "rejected": 1610
+    },
+    "CYS-USDT": {
+      "evaluations": 1612,
+      "marketCandleEvents": 1624,
+      "rejected": 1612
+    },
+    "DOGE-USDT": {
+      "evaluations": 1612,
+      "marketCandleEvents": 1624,
+      "rejected": 1612
+    },
+    "DUSK-USDT": {
+      "evaluations": 1611,
+      "marketCandleEvents": 1623,
+      "rejected": 1611
+    },
+    "ETC-USDT": {
+      "evaluations": 1610,
+      "marketCandleEvents": 1622,
+      "rejected": 1610
+    },
+    "ETH-USDT": {
+      "evaluations": 1614,
+      "marketCandleEvents": 1624,
+      "rejected": 1614
+    },
+    "HANA-USDT": {
+      "evaluations": 1611,
+      "marketCandleEvents": 1624,
+      "rejected": 1611
+    },
+    "LINK-USDT": {
+      "evaluations": 1615,
+      "marketCandleEvents": 1624,
+      "rejected": 1614,
+      "technicalSignals": 1
+    },
+    "LYN-USDT": {
+      "evaluations": 1611,
+      "marketCandleEvents": 1623,
+      "rejected": 1611
+    },
+    "OPN-USDT": {
+      "evaluations": 1611,
+      "marketCandleEvents": 1623,
+      "rejected": 1610,
+      "technicalSignals": 1
+    },
+    "ORDER-USDT": {
+      "evaluations": 1612,
+      "marketCandleEvents": 1624,
+      "rejected": 1612
+    },
+    "ROSE-USDT": {
+      "evaluations": 1612,
+      "marketCandleEvents": 1621,
+      "rejected": 1612
+    },
+    "SOL-USDT": {
+      "evaluations": 1615,
+      "marketCandleEvents": 1624,
+      "rejected": 1615
+    },
+    "THE-USDT": {
+      "evaluations": 1610,
+      "marketCandleEvents": 1622,
+      "rejected": 1610
+    },
+    "ZEC-USDT": {
+      "evaluations": 1610,
+      "marketCandleEvents": 1624,
+      "rejected": 1610
+    }
+  },
+  "confirmedSignals": [
+    {
+      "closeAtUtc": "2026-11-15T01:10:00+00:00",
+      "direction": "Short",
+      "regime": "TrendingDown",
+      "symbol": "LINK-USDT"
+    },
+    {
+      "closeAtUtc": "2026-11-15T17:50:00+00:00",
+      "direction": "Short",
+      "regime": "TrendingDown",
+      "symbol": "OPN-USDT"
+    }
+  ],
+  "distinctEvaluationCandles": 33840,
+  "distinctMarketCandles": 34091,
+  "entryTimeframe": "5m",
+  "evaluationCandlesMissingMarketLog": 0,
+  "evaluationEvents": 33840,
+  "eventTimeWindowUtc": {
+    "fromInclusive": "2026-11-14T05:13:06+00:00",
+    "toExclusive": "2026-11-21T05:13:06+00:00"
+  },
+  "macdDecisionEvents": 0,
+  "marketCandleEvents": 34091,
+  "observedReasonDetails": {
+    "15mFirstReject": {
+      "rsi_failed_other_gates_unknown": 420,
+      "rsi_passed_other_gate_failed": 2455
+    },
+    "1hFirstReject": {
+      "adx_and_ema_stack": 2344,
+      "adx_below_floor_ema_stack_aligned_price_unknown": 10369,
+      "adx_passed_ema_stack_failed_price_unknown": 1697,
+      "atr_high": 1836,
+      "ema_close_condition_by_elimination": 3119
+    },
+    "30mFirstReject": {
+      "structure_failed_ema_unknown": 5003,
+      "structure_passed_ema_or_price_failed": 461
+    }
+  },
+  "potentialBreakoutProxy": {
+    "definition": "Anchors based on directional close outside the preceding 12 contiguous logged 5m bars. Consecutive same-direction anchors collapse into one episode, attributed to the first anchor.",
+    "eligibleCandles": 32423,
+    "eligibleCandlesBySymbol": {
+      "ARB-USDT": 1544,
+      "AVAX-USDT": 1544,
+      "BNB-USDT": 1544,
+      "BR-USDT": 1544,
+      "BTC-USDT": 1544,
+      "BTW-USDT": 1544,
+      "CVC-USDT": 1544,
+      "CYS-USDT": 1544,
+      "DOGE-USDT": 1544,
+      "DUSK-USDT": 1544,
+      "ETC-USDT": 1544,
+      "ETH-USDT": 1544,
+      "HANA-USDT": 1544,
+      "LINK-USDT": 1544,
+      "LYN-USDT": 1544,
+      "OPN-USDT": 1544,
+      "ORDER-USDT": 1544,
+      "ROSE-USDT": 1543,
+      "SOL-USDT": 1544,
+      "THE-USDT": 1544,
+      "ZEC-USDT": 1544
+    },
+    "episodes": 3169,
+    "episodesByLiveFirstReasonAtAnchor": {
+      "15m setup lacks momentum or entry is extended": 335,
+      "30m trend or rolling structure conflicts with 1h": 509,
+      "market regime does not permit a trend entry": 1826,
+      "no matching Live evaluation": 25,
+      "stale or gapped market data": 206,
+      "waiting for qualified 5m breakout/retest or cooldown": 268
+    },
+    "episodesBySymbolRegimeReasonDirection": [
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 17,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 14,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 24,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 23,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 47,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ARB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 17,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 24,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 32,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 30,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "AVAX-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 18,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 21,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 29,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 38,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BNB-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 19,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingUp",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingUp",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingUp",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 40,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 57,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingUp",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingUp",
+        "symbol": "BR-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 35,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 45,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "BTC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 65,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 77,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "BTW-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 12,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 43,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 33,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "CVC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 27,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 16,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 22,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 38,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "CYS-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 14,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 41,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 41,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "DOGE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 16,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 19,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 38,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 57,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "DUSK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 16,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 18,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 38,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 45,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 12,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ETC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 17,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 34,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 39,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ETH-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 19,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 30,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 28,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "HANA-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 12,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 46,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 44,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "LINK-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 44,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 50,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "LYN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 16,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 45,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 42,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "OPN-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 14,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 50,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 60,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ORDER-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 11,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 12,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 38,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 53,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ROSE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 12,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 54,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 48,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "SOL-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 4,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 13,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 15,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 46,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 47,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "no matching Live evaluation",
+        "regime": "Unknown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 5,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 10,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 6,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "THE-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Long",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 14,
+        "direction": "Short",
+        "reason": "15m setup lacks momentum or entry is extended",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 9,
+        "direction": "Long",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "30m trend or rolling structure conflicts with 1h",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 1,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 3,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "HighVolatility",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 27,
+        "direction": "Long",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 51,
+        "direction": "Short",
+        "reason": "market regime does not permit a trend entry",
+        "regime": "Sideways",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Long",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 2,
+        "direction": "Short",
+        "reason": "stale or gapped market data",
+        "regime": "Unknown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 8,
+        "direction": "Long",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      },
+      {
+        "count": 7,
+        "direction": "Short",
+        "reason": "waiting for qualified 5m breakout/retest or cooldown",
+        "regime": "TrendingDown",
+        "symbol": "ZEC-USDT",
+        "timeframe": "5m"
+      }
+    ],
+    "observedReasonDetailsAtEpisodeAnchor": {
+      "15mFirstReject": {
+        "rsi_failed_other_gates_unknown": 46,
+        "rsi_passed_other_gate_failed": 289
+      },
+      "1hFirstReject": {
+        "adx_and_ema_stack": 229,
+        "adx_below_floor_ema_stack_aligned_price_unknown": 980,
+        "adx_passed_ema_stack_failed_price_unknown": 153,
+        "atr_high": 178,
+        "ema_close_condition_by_elimination": 286
+      },
+      "30mFirstReject": {
+        "structure_failed_ema_unknown": 466,
+        "structure_passed_ema_or_price_failed": 43
+      }
+    },
+    "priceBreakoutBars": 4630,
+    "priceBreakoutBarsByLiveFirstReason": {
+      "15m setup lacks momentum or entry is extended": 509,
+      "30m trend or rolling structure conflicts with 1h": 802,
+      "market regime does not permit a trend entry": 2611,
+      "no matching Live evaluation": 42,
+      "stale or gapped market data": 302,
+      "waiting for qualified 5m breakout/retest or cooldown": 364
+    }
+  },
+  "rejectedEvaluationEvents": 33838,
+  "rejectionByReason": {
+    "15m setup lacks momentum or entry is extended": 2875,
+    "30m trend or rolling structure conflicts with 1h": 5464,
+    "market regime does not permit a trend entry": 19365,
+    "stale or gapped market data": 2638,
+    "waiting for qualified 5m breakout/retest or cooldown": 3496
+  },
+  "rejectionByRegime": {
+    "HighVolatility": 1836,
+    "Sideways": 17529,
+    "TrendingDown": 11762,
+    "TrendingUp": 73,
+    "Unknown": 2638
+  },
+  "rejectionBySymbolRegimeReason": [
+    {
+      "count": 193,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ARB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 322,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ARB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 751,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ARB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 134,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ARB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 209,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ARB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 189,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "AVAX-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 381,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "AVAX-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 717,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "AVAX-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 154,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "AVAX-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 172,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "AVAX-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 159,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "BNB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 311,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "BNB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 802,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "BNB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 140,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "BNB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 200,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "BNB-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 128,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 14,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingUp",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 115,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 28,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingUp",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 13,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "HighVolatility",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 998,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 112,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 167,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 31,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingUp",
+      "symbol": "BR-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 127,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "BTC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 259,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "BTC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 842,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "BTC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 207,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "BTC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 179,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "BTC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 1463,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "HighVolatility",
+      "symbol": "BTW-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 147,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "BTW-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 97,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "CVC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 340,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "CVC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 850,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "CVC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 109,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "CVC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 214,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "CVC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 297,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "CYS-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 325,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "CYS-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 634,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "CYS-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 97,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "CYS-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 259,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "CYS-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 149,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "DOGE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 304,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "DOGE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 878,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "DOGE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 130,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "DOGE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 151,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "DOGE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 104,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "DUSK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 319,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "DUSK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 920,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "DUSK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 114,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "DUSK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 154,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "DUSK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 156,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ETC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 355,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ETC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 837,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ETC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 110,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ETC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 152,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ETC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 159,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ETH-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 317,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ETH-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 834,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ETH-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 137,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ETH-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 167,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ETH-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 76,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 322,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 168,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "HighVolatility",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 784,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 77,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 184,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "HANA-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 154,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "LINK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 220,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "LINK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 953,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "LINK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 149,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "LINK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 138,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "LINK-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 90,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 185,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 134,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "HighVolatility",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 1049,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 81,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 72,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "LYN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 101,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "OPN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 328,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "OPN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 848,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "OPN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 147,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "OPN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 186,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "OPN-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 101,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ORDER-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 162,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ORDER-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 1106,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ORDER-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 98,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ORDER-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 145,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ORDER-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 141,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ROSE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 232,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ROSE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 969,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ROSE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 124,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ROSE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 146,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ROSE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 148,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "SOL-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 226,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "SOL-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 936,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "SOL-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 139,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "SOL-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 166,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "SOL-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 167,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "THE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 254,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "THE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 899,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "THE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 90,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "THE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 200,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "THE-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 125,
+      "reason": "15m setup lacks momentum or entry is extended",
+      "regime": "TrendingDown",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 159,
+      "reason": "30m trend or rolling structure conflicts with 1h",
+      "regime": "TrendingDown",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 58,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "HighVolatility",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 922,
+      "reason": "market regime does not permit a trend entry",
+      "regime": "Sideways",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 142,
+      "reason": "stale or gapped market data",
+      "regime": "Unknown",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    },
+    {
+      "count": 204,
+      "reason": "waiting for qualified 5m breakout/retest or cooldown",
+      "regime": "TrendingDown",
+      "symbol": "ZEC-USDT",
+      "timeframe": "5m"
+    }
+  ],
+  "source": "Seq localhost /api/data, application logs from Live strategy evaluation and market data"
+}

@@ -14,10 +14,39 @@ assumptions:
       during emergency protection. On 2026-11-08 all eight scenarios passed again with MACD enabled and only 70 initial
       closed candles, below the default warm-up of 130. The macd-management-20261108 loopback run recorded 242 requests.
       Both runs used synthetic credentials. Live exchange fills, races and idempotency retention remain unverified.
+      The 2026-11-21 Release readiness run passed all eight scenarios again with the v3 account margin fields.
+      The local simulator recorded 246 requests including the separate four-request empty-income pass.
     source: src/TradingBot.Worker/Infrastructure/Live/LiveTradingEngine.Advanced.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.Management.cs; tests/TradingBot.ExecutionSmoke/LiveManagementSmoke.cs
-    updated_at: "2026-11-08"
+    updated_at: "2026-11-21"
+  - id: successful-empty-income-is-null
+    status: supported
+    claim: BingX returned HTTP 200 with code 0, an empty message and a null data field for two historical account income queries without ledger rows.
+    reason: >-
+      In the 2026-11-21 audit, GET /openApi/swap/v2/user/income for UTC midnight through the two Live signals on 2026-11-15
+      returned explicit null. The control window 2026-11-05 through 2026-11-06 returned an array with six records.
+      The official BingX reference shows an array when rows are present and has no example for the empty ledger.
+    verification: >-
+      The empty-income-20261121 loopback smoke ran the production executor with synthetic keys.
+      Simulation output showed reset, balance GET, income GET with code 0 and data null, and commission GET.
+      The snapshot preserved equity and commission and reported zero cash flows. Unit tests also reject missing or
+      malformed data and nonzero exchange codes.
+      The follow-up run on 2026-11-21 reproduced the three read-only calls on loopback with synthetic keys.
+      A separate xUnit test used the real parser with an in-process HTTP fixture and the approved-policy Live engine
+      with a synthetic exchange. It verified continued enforcement of daily loss and margin/size checks,
+      and refusal to reconcile a closed position without realized PnL and trading fee records.
+      The Release readiness smoke also asserted used margin, frozen margin and available margin alongside the empty ledger.
+    source: docs/trading-pipeline-audit.md; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.Management.cs; tests/TradingBot.ExecutionSmoke/Program.cs; tests/TradingBot.Tests/BingXLiveExecutorTests.cs; tests/TradingBot.Tests/LivePositionManagementTests.cs
+    updated_at: "2026-11-21"
 fingerprints:
   - id: macd-management-20261108
     date: "2026-11-08"
     commit: db44904e830bbdfeb283570f449b7131f9530470 (dirty working tree with MACD changes)
+    cli: "1.73.0"
+  - id: empty-income-20261121
+    date: "2026-11-21"
+    commit: 0ea1b6c7f093a2cf92d57224d6611118d4a4b985 (dirty working tree with empty income regression fix)
+    cli: "1.73.0"
+  - id: live-readiness-20261121
+    date: "2026-11-21"
+    commit: 0ea1b6c7f093a2cf92d57224d6611118d4a4b985 (dirty tree, see candidate DLL hash in docs/live-trading-readiness.md)
     cli: "1.73.0"

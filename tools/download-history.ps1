@@ -1,13 +1,15 @@
 param(
     [string[]]$Symbols = @('BTC-USDT', 'ETH-USDT'),
     [int]$Days = 30,
-    [string]$OutputDirectory = 'artifacts/market-history'
+    [string]$OutputDirectory = 'artifacts/market-history',
+    [DateTimeOffset]$EndUtc = [DateTimeOffset]::UtcNow
 )
 $ErrorActionPreference = 'Stop'
 if ($Days -lt 15 -or $Days -gt 3650) { throw 'Days must be between 15 and 3650.' }
 New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
 $fetchedAt = [DateTimeOffset]::UtcNow
-$end = [long]([Math]::Floor($fetchedAt.ToUnixTimeMilliseconds() / 300000) * 300000)
+if ($EndUtc -gt $fetchedAt) { throw 'EndUtc cannot be in the future.' }
+$end = [long]([Math]::Floor($EndUtc.ToUnixTimeMilliseconds() / 300000) * 300000)
 $start = $end - [long]$Days * 86400000
 foreach ($symbol in $Symbols) {
     if ($symbol -notmatch '^[A-Z0-9]+-USDT$') { throw "Invalid symbol: $symbol" }
@@ -18,7 +20,8 @@ foreach ($symbol in $Symbols) {
     $cursor = $end - 1
     while ($cursor -ge $start) {
         Start-Sleep -Milliseconds 1100
-        $pageStart = [Math]::Max($start, $cursor - 86400000L + 1)
+        # Three days fit below the API's 1,000-row limit at 5m (864 rows).
+        $pageStart = [Math]::Max($start, $cursor - 259200000L + 1)
         $uri = "https://open-api.bingx.com/openApi/swap/v3/quote/klines?symbol=$symbol&interval=5m&startTime=$pageStart&endTime=$cursor&limit=1000"
         $result = $null
         for ($attempt = 0; $attempt -lt 4; $attempt++) {
@@ -31,18 +34,16 @@ foreach ($symbol in $Symbols) {
                 Start-Sleep -Seconds ([Math]::Pow(2, $attempt + 1))
             }
         }
-        $oldest = ($result.data | Measure-Object -Property time -Minimum).Minimum
-        if ($oldest -gt $cursor) { throw 'Pagination did not move backwards.' }
+        $expectedFirst = $pageStart
         foreach ($row in $result.data) {
             $time = [long]$row.time
             if ($time -gt $cursor -or $time -lt $pageStart) { throw 'API returned candles outside requested page.' }
             if ($time -ge $start -and $time -lt $end) { $rows[$time] = $row }
         }
-        $cursor = [long]$oldest - 1
-        # Preserve read-only download progress if a later page fails. The replay still validates gaps.
-        $rows.Values | Select-Object time,open,high,low,close,volume |
-            Export-Csv -LiteralPath (Join-Path $OutputDirectory "$symbol-5m.csv") -NoTypeInformation -Encoding utf8
+        if (-not $rows.ContainsKey($expectedFirst)) { throw "Incomplete page for $symbol at $expectedFirst." }
+        $cursor = $pageStart - 1
     }
+    if ($rows.Count -ne $Days * 288) { throw "Expected $($Days * 288) consecutive candles for $symbol, received $($rows.Count)." }
     $path = Join-Path $OutputDirectory "$symbol-5m.csv"
     $rows.Values | Select-Object time,open,high,low,close,volume | Export-Csv -LiteralPath $path -NoTypeInformation -Encoding utf8
     $manifest = @{

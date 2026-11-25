@@ -44,6 +44,8 @@ public sealed class StrategyOptions
     public List<string> ExcludedSymbols { get; set; } = new();
     // Select the same multi-timeframe signal policy for paper and live.
     public bool UseMultiTimeframeAnalysis { get; set; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool UseAdaptiveCurrentEntries { get; set; }
     public int PrimaryEmaPeriod { get; set; } = 200;
     public int AdxPeriod { get; set; } = 14;
     public decimal MinimumAdx { get; set; } = 20m;
@@ -94,6 +96,17 @@ public sealed class RiskOptions
     public decimal MaxAggregateExposurePercent { get; set; } = 300m;
 }
 
+public sealed class ExperimentalStrategyOptions
+{
+    public const string SectionName = "ExperimentalStrategy";
+    public bool Enabled { get; set; }
+    public decimal MinimumAdx { get; set; } = 20m;
+    public decimal MinimumAtrPercent { get; set; } = 0.1m;
+    public decimal MaximumAtrPercent { get; set; } = 3m;
+    public int PullbackBars { get; set; } = 3;
+    public decimal MaximumEntryDistanceAtr { get; set; } = 1.5m;
+}
+
 public sealed class AdaptiveOptions
 {
     public const string SectionName = "Adaptive";
@@ -113,6 +126,7 @@ public sealed class LiveOptions
     // Off by default. This places REAL orders with REAL money when true - never flip without
     // understanding the risks documented alongside this feature.
     public bool Enabled { get; set; }
+    public bool AllowAdaptiveCurrentEntries { get; set; }
     // Unset keeps the shared Risk setting for existing configurations.
     public decimal? RiskPerTradePercent { get; set; }
     public string StatePath { get; set; } = "data/live-state.json";
@@ -173,4 +187,14 @@ public sealed class OpenAIOptions
     public decimal MaximumEntryDeviationPercent { get; set; } = 0.25m;
     public decimal MinimumConfidence { get; set; } = 0.6m;
     public string? ApiKey { get; set; }
+}
+
+public sealed class TradingFrequencyOptions
+{
+    public const string SectionName = "TradingFrequency";
+    public bool Enabled { get; set; } = true;
+    public int TargetEntriesPerDay { get; set; } = 1;
+    public string TimeZone { get; set; } = "SE Asia Standard Time";
+    public bool CountOnlyFilledEntries { get; set; } = true;
+    public bool ForceEntryToMeetTarget { get; set; }
 }

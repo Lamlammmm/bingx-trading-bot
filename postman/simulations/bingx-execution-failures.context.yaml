@@ -8,5 +8,16 @@ assumptions:
     reason: The observed stand-in write count and surfaced timeout establish no executor retry in this scenario. The failure injection is synthetic and does not establish BingX latency, idempotency retention, or real fills. Owner mock discovery was skipped because this CLI does not provide status/auth state for the required discovery workflow; the mock uses current official response envelopes and caller contract.
     verification: On 2026-11-06 the production executor passed 6 local HTTP scenarios. Success wrote once; HTTP 429, HTTP 502 HTML and code 100410 surfaced errors with zero writes. Timeout after the mock committed produced TaskCanceledException with one request and one write. A 0.5 position rejected validation for requested quantity 1. Mock request logs and control state confirmed the paths ran. Existing unit tests separately verify the engine pending-order latch survives restart. No real exchange order was sent.
     source: tests/TradingBot.ExecutionSmoke/Program.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.cs; tests/TradingBot.Tests/LiveTradingEngineTests.cs
-    updated_at: "2026-11-06"
-fingerprints: []
+    updated_at: "2026-11-21"
+  - id: readiness-execution-regression
+    status: supported
+    claim: The Release caller continues to send one order request per synthetic scenario and to reject incomplete protection.
+    reason: Local request logs and mock write counts distinguish rejected requests from one committed synthetic request followed by timeout.
+    verification: On 2026-11-21, all six Release smoke cases passed. The simulator logged 14 loopback requests including fixture controls. The business-error scenario surfaced BingXOrderRejected with no synthetic write. The timeout-after-write case still made one request and one synthetic write.
+    source: tests/TradingBot.ExecutionSmoke/Program.cs; docs/live-trading-readiness.md
+    updated_at: "2026-11-21"
+fingerprints:
+  - id: live-readiness-20261121
+    date: "2026-11-21"
+    commit: 0ea1b6c7f093a2cf92d57224d6611118d4a4b985 (dirty candidate tree)
+    cli: "1.73.0"

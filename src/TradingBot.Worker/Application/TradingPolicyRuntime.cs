@@ -18,6 +18,8 @@ public sealed class TradingPolicyRuntime
         if (Hash(snapshot.ConfigurationJson) != snapshot.ConfigurationHash) throw new InvalidOperationException("Strategy configuration hash mismatch.");
         Snapshot = snapshot;
         Configuration = JsonSerializer.Deserialize<TradingConfiguration>(snapshot.ConfigurationJson)!;
+        if (Configuration.Strategy.UseAdaptiveCurrentEntries && !Configuration.Strategy.UseMultiTimeframeAnalysis)
+            throw new InvalidOperationException("Adaptive Current entries require multi-timeframe analysis.");
         Strategy = Configuration.Strategy.UseMultiTimeframeAnalysis
             ? new MultiTimeframeStrategy(Options.Create(Configuration.Strategy)) : new BreakoutStrategy(Options.Create(Configuration.Strategy));
     }
@@ -42,10 +44,14 @@ public sealed class TradingPolicyRuntime
         return plan with { Quantity = quantity, RiskAmount = plan.RiskAmount * quantity / plan.Quantity, EntryFee = plan.EntryFee * quantity / plan.Quantity };
     }
 
-    public static void ValidateEvidence(StrategyRegistration registration)
+    public static void ValidateEvidence(StrategyRegistration registration, string? expectedActiveVersion = null)
     {
         var e = registration.Evidence ?? throw new InvalidOperationException("Validation evidence is required.");
         var cfg = JsonSerializer.Deserialize<TradingConfiguration>(registration.Snapshot.ConfigurationJson)!;
+        if (cfg.Strategy.UseAdaptiveCurrentEntries && !cfg.Strategy.UseMultiTimeframeAnalysis)
+            throw new InvalidOperationException("Adaptive Current evidence requires multi-timeframe analysis.");
+        if (cfg.Strategy.UseAdaptiveCurrentEntries && expectedActiveVersion is not null && registration.PreviousVersion != expectedActiveVersion)
+            throw new InvalidOperationException("Adaptive Current evidence must compare against the active baseline.");
         if (e.ConfigurationHash != registration.Snapshot.ConfigurationHash || e.ArtifactHash.Length != 64 || !e.ArtifactHash.All(Uri.IsHexDigit) ||
             !e.BacktestPassed || !e.ShadowPassed || e.WalkForwardFolds < 3 || e.OutOfSampleTrades < cfg.Adaptive.MinimumTrades ||
             e.ShadowTrades < cfg.Adaptive.MinimumTrades || e.OutOfSampleExpectancy <= 0m || e.OutOfSampleExpectancy <= e.ActiveExpectancy ||
@@ -61,7 +67,7 @@ public sealed class TradingPolicyRuntime
         var a = JsonNode.Parse(active.ConfigurationJson)!; var b = JsonNode.Parse(candidate.ConfigurationJson)!;
         foreach (var (section, names) in new[]
         {
-            ("Strategy", new[] { "MinimumAdx", "MinimumAtrPercent", "MaximumAtrPercent", "MaximumSetupDistanceAtr", "SignalCooldownBars", "MinimumBodyRatio", "VolumeMultiplier", "RetestConfirmationBars", "MaxRetestEntryDistanceAtr" }),
+            ("Strategy", new[] { "MinimumAdx", "MinimumAtrPercent", "MaximumAtrPercent", "MaximumSetupDistanceAtr", "SignalCooldownBars", "MinimumBodyRatio", "VolumeMultiplier", "RetestConfirmationBars", "MaxRetestEntryDistanceAtr", "UseAdaptiveCurrentEntries" }),
             ("Risk", new[] { "StopAtrMultiplier", "TrailingAtrMultiplier", "BreakEvenTriggerR", "TrailingStartR", "TakeProfitRiskMultiple", "PartialTakeProfitRMultiple", "SecondTakeProfitRMultiple", "ExitCooldownBars" })
         })
             foreach (var name in names) { a[section]!.AsObject().Remove(name); b[section]!.AsObject().Remove(name); }

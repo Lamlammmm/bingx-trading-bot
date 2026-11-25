@@ -265,7 +265,11 @@ public sealed partial class BingXLiveExecutor(HttpClient httpClient, IOptions<Bi
                 ? messageProperty.ToString().Replace(_options.ApiKey, "[redacted]").Replace(_options.ApiSecret, "[redacted]")
                 : "No error message returned";
             document.Dispose();
-            throw new InvalidOperationException($"BingX live API rejected {path}: code={errorCode}, msg={errorMessage}.");
+            var message = $"BingX live API rejected {path}: code={errorCode}, msg={errorMessage}.";
+            if (path == "/openApi/swap/v2/trade/order" && method == HttpMethod.Post &&
+                int.TryParse(errorCode, out var rejectionCode) && rejectionCode != 0)
+                throw new BingXOrderRejected(rejectionCode, message);
+            throw new InvalidOperationException(message);
         }
         return document;
     }

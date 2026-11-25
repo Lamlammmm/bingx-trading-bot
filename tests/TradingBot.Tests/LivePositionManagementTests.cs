@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -7,6 +8,7 @@ using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
 using TradingBot.Worker.Infrastructure.Live;
 using TradingBot.Worker.Infrastructure;
+using TradingBot.Worker.Infrastructure.BingX;
 using TradingBot.Worker.Infrastructure.PaperTrading;
 
 namespace TradingBot.Tests;
@@ -97,7 +99,7 @@ public sealed class LivePositionManagementTests
     }
 
     [Fact]
-    public async Task ApiFailuresPersistAcrossUnrelatedUpdatesAndOpenCircuit()
+    public async Task ApiCircuitStopsEntryButTracksExistingProtectionWhenTheExchangeRecovers()
     {
         using var f = new Fixture(TradeDirection.Long);
         using var engine = f.Create();
@@ -112,8 +114,33 @@ public sealed class LivePositionManagementTests
         Assert.False(engine.IsReady);
         Assert.NotNull(f.State().ApiCircuitUntil);
         var queries = f.Exchange.ManagedQueries;
-        await engine.ProcessAsync(f.Bar(4, 112m), default);
+        await engine.ProcessAsync(f.Bar(4, 112m) with { Symbol = "ETH-USDT" }, default);
         Assert.Equal(queries, f.Exchange.ManagedQueries);
+        Assert.Empty(f.Exchange.Writes);
+
+        f.Exchange.Failure = null;
+        await engine.ProcessAsync(f.Bar(5, 112m), default);
+        Assert.True(f.Exchange.ManagedQueries > queries);
+        Assert.Equal(new[] { "replace-stop", "close", "replace-stop", "replace-take" }, f.Exchange.Writes);
+        Assert.Equal(0.5m, f.Exchange.ProtectedQuantity);
+        Assert.False(engine.IsReady); // Entry backoff still applies after a successful management read.
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Fact]
+    public async Task OpenApiCircuitBlocksAnOtherwiseValidEntryWithoutQueryingLeverage()
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        File.WriteAllText(f.PathName, JsonSerializer.Serialize(new LiveTradingEngine.LiveState
+        {
+            ApiCircuitUntil = DateTimeOffset.UtcNow.AddMinutes(5)
+        }));
+        using var engine = f.Create();
+        await engine.InitializeAsync(default);
+        await f.Entry(engine);
+        Assert.False(engine.IsReady);
+        Assert.Equal(0, f.Exchange.LeverageLimitReads);
+        Assert.Equal(0, f.Exchange.LeverageWrites);
         Assert.Empty(f.Exchange.Writes);
     }
 
@@ -155,6 +182,221 @@ public sealed class LivePositionManagementTests
         Assert.DoesNotContain("open", f.Exchange.Writes);
     }
 
+    [Theory]
+    [InlineData("null", 1000, 1000, true, true)]
+    [InlineData("[]", 1000, 1000, true, true)]
+    [InlineData("null", 980, 1000, false, false)] // Unrealized loss reaches the 2% daily limit.
+    [InlineData("null", 1000, 0, false, false)] // No available margin.
+    [InlineData("null", 1000, 0.1, true, false)] // Positive margin, but rounded size is below the contract minimum.
+    public async Task SuccessfulEmptyBingXIncomeStillRequiresLiveRiskApproval(
+        string ledger, int equity, double availableMargin, bool reachesSizing, bool opens)
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        using var db = new ResearchFixture(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }, f.Risk);
+        using var handler = new IncomeHttpHandler("{\"code\":0,\"data\":" + ledger + "}", equity, (decimal)availableMargin);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://exchange.invalid") };
+        var accountApi = new BingXLiveExecutor(http, Options.Create(new BingXOptions { ApiKey = "fixture", ApiSecret = "synthetic" }),
+            NullLogger<BingXLiveExecutor>.Instance);
+        f.Exchange.AccountSource = accountApi.GetAccountSnapshotAsync;
+
+        using var engine = f.Create(db.Governance, new Quotes());
+        await engine.InitializeAsync(default);
+        await f.Entry(engine);
+
+        Assert.Equal(new[] { IncomeHttpHandler.Balance, IncomeHttpHandler.Income, IncomeHttpHandler.Commission }, handler.Requests);
+        Assert.Equal(1000m, f.State().DayStartBalance);
+        Assert.Equal(equity, f.State().EquityHighWater);
+        Assert.Equal(reachesSizing ? 1 : 0, f.Exchange.LeverageLimitReads);
+        Assert.Equal(opens ? 1 : 0, f.Exchange.LeverageWrites);
+        if (opens)
+        {
+            Assert.Equal(new[] { "open" }, f.Exchange.Writes);
+            var management = Assert.Single(f.State().Positions).Management!;
+            Assert.InRange(management.InitialRiskAmount, 0.0001m, 10m);
+            Assert.Equal(0.0005m, management.FeeRate);
+            Assert.Contains(f.Journal.Events, entry => entry.Kind == "entry_protected");
+        }
+        else
+        {
+            Assert.Empty(f.Exchange.Writes);
+            Assert.Empty(f.State().Positions);
+            Assert.DoesNotContain(f.Journal.Events, entry => entry.Kind == "entry_requested");
+        }
+        Assert.Null(f.State().PendingOrder);
+        Assert.True(engine.IsReady);
+    }
+
+    [Theory]
+    [InlineData(200, 0, false)]
+    [InlineData(150, 50, false)]
+    [InlineData(190, 5, true)]
+    public async Task LiveEntryUsesOnlyTheRemainingAccountMarginBudget(int used, int frozen, bool opens)
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        using var db = new ResearchFixture(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }, f.Risk);
+        using var handler = new IncomeHttpHandler("""{"code":0,"data":null}""", margin: 1000m - used - frozen,
+            usedMargin: used, frozenMargin: frozen);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://exchange.invalid") };
+        var accountApi = new BingXLiveExecutor(http, Options.Create(new BingXOptions { ApiKey = "fixture", ApiSecret = "synthetic" }),
+            NullLogger<BingXLiveExecutor>.Instance);
+        f.Exchange.AccountSource = accountApi.GetAccountSnapshotAsync;
+        using var engine = f.Create(db.Governance, new Quotes(), marginUsagePercent: 20m);
+        await engine.InitializeAsync(default);
+        await f.Entry(engine);
+
+        if (opens)
+        {
+            Assert.Equal(new[] { "open" }, f.Exchange.Writes);
+            Assert.InRange(f.Exchange.EntryPrice * f.Exchange.Quantity * (1m / 5m + 2m * 0.0005m), 0.01m, 200m - used - frozen);
+        }
+        else
+        {
+            Assert.Empty(f.Exchange.Writes);
+            Assert.Equal(0, f.Exchange.LeverageLimitReads);
+            Assert.Equal(0, f.Exchange.LeverageWrites);
+        }
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Fact]
+    public async Task OperatorHaltSetDuringFinalValidationBlocksBothLeverageAndEntryWrites()
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        using var db = new ResearchFixture(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }, f.Risk);
+        using var engine = f.Create(db.Governance, new Quotes());
+        await engine.InitializeAsync(default);
+        f.Exchange.PositionModeSource = token => db.Governance.Store.SetHaltAsync(TradingMode.LIVE, true, "test halt during validation", token);
+        await f.Entry(engine);
+
+        Assert.True(await db.Governance.Store.IsHaltedAsync(TradingMode.LIVE, default));
+        Assert.Equal(1, f.Exchange.LeverageLimitReads);
+        Assert.Equal(0, f.Exchange.LeverageWrites);
+        Assert.Empty(f.Exchange.Writes);
+        Assert.DoesNotContain(f.Journal.Events, entry => entry.Kind == "entry_requested");
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Fact]
+    public async Task OperatorHaltPreservesThePinnedManagementOfAnExistingPosition()
+    {
+        using var f = new Fixture(TradeDirection.Long);
+        using var db = new ResearchFixture(new StrategyOptions(), f.Risk);
+        await db.Governance.InitializeAsync(TradingMode.LIVE, default);
+        var policy = await db.Governance.ActiveAsync(TradingMode.LIVE, default);
+        await db.Governance.Store.SetHaltAsync(TradingMode.LIVE, true, "test operator halt", default);
+        var state = f.State();
+        var position = Assert.Single(state.Positions);
+        var management = position.Management!;
+        var context = new TradingContext(policy.Snapshot, "signal-fixture", position.TradeId!, 5m, 1000m, "fixture");
+        state.Positions[0] = position with { Management = management with { Metrics = management.Metrics with { Context = context } } };
+        state.TradeContexts[context.TradeId] = context;
+        File.WriteAllText(f.PathName, JsonSerializer.Serialize(state));
+
+        using var engine = f.Create(db.Governance, new Quotes());
+        await engine.InitializeAsync(default);
+        await engine.ProcessAsync(f.Bar(0, 112m), default);
+
+        Assert.Equal(new[] { "replace-stop", "close", "replace-stop", "replace-take" }, f.Exchange.Writes);
+        Assert.Equal(0.5m, Assert.Single(f.State().Positions).Quantity);
+        Assert.Equal(0.5m, f.Exchange.ProtectedQuantity);
+        Assert.Equal(0, f.Exchange.LeverageWrites);
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ApprovedAdaptiveCurrentStillRequiresTheLiveFeatureFlag(bool allowAdaptiveCurrent)
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        using var db = new ResearchFixture(new StrategyOptions { UseMultiTimeframeAnalysis = true }, f.Risk);
+        await db.Governance.InitializeAsync(TradingMode.LIVE, default);
+        var legacy = await db.Governance.ActiveAsync(TradingMode.LIVE, default);
+        var configuration = JsonSerializer.Deserialize<TradingConfiguration>(legacy.Snapshot.ConfigurationJson)!;
+        configuration.Strategy.UseAdaptiveCurrentEntries = true;
+        var json = JsonSerializer.Serialize(configuration);
+        var candidate = legacy.Snapshot with
+        {
+            Version = "adaptive-entry-fixture", ConfigurationJson = json,
+            ConfigurationHash = TradingPolicyRuntime.Hash(json), ApprovalStatus = "CANDIDATE"
+        };
+        await db.Store.RegisterAsync(new(candidate, "CANDIDATE", PreviousVersion: legacy.Snapshot.Version), false, default);
+        await db.Governance.ValidateCandidateAsync(TradingMode.LIVE, candidate.Version,
+            TradingGovernanceTests.Evidence(candidate.ConfigurationHash), default);
+        await db.Store.PromoteAsync(TradingMode.LIVE, candidate.Version, legacy.Snapshot.Version, "synthetic reviewer", "APPROVE", default);
+
+        using var engine = f.Create(db.Governance, new Quotes(), allowAdaptiveCurrent: allowAdaptiveCurrent);
+        await engine.InitializeAsync(default);
+        await f.Entry(engine);
+
+        var active = await db.Governance.ActiveAsync(TradingMode.LIVE, default);
+        Assert.Equal(allowAdaptiveCurrent, active.Strategy.LastEvaluation is not null);
+        Assert.Empty(f.Exchange.Writes);
+        Assert.Equal(0, f.Exchange.LeverageWrites);
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.OK, """{"data":null}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.OK, """{"code":"0","data":null}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.OK, """{"code":0}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.OK, """{"code":0,"data":[null]}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.OK, """{"code":100400,"data":null}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.OK, """{"code":0,"data":""", typeof(JsonException))]
+    [InlineData(HttpStatusCode.TooManyRequests, """{"code":0,"data":null}""", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.BadGateway, "<html>not JSON</html>", typeof(InvalidOperationException))]
+    [InlineData(HttpStatusCode.RequestTimeout, "", typeof(InvalidOperationException))]
+    [InlineData(null, "", typeof(HttpRequestException))]
+    public async Task FailedBingXIncomeStopsAdvancedEntryBeforeAnyWrite(HttpStatusCode? status, string body, Type failureType)
+    {
+        using var f = new Fixture(TradeDirection.Long, held: false);
+        using var db = new ResearchFixture(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }, f.Risk);
+        using var handler = new IncomeHttpHandler(body, incomeStatus: status);
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://exchange.invalid") };
+        var accountApi = new BingXLiveExecutor(http, Options.Create(new BingXOptions { ApiKey = "fixture", ApiSecret = "synthetic" }),
+            NullLogger<BingXLiveExecutor>.Instance);
+        f.Exchange.AccountSource = accountApi.GetAccountSnapshotAsync;
+
+        using var engine = f.Create(db.Governance, new Quotes());
+        await engine.InitializeAsync(default);
+        var error = await Record.ExceptionAsync(() => f.Entry(engine));
+
+        Assert.IsAssignableFrom(failureType, error);
+        Assert.Equal(new[] { IncomeHttpHandler.Balance, IncomeHttpHandler.Income }, handler.Requests);
+        Assert.Equal(1, f.State().ConsecutiveApiFailures);
+        Assert.Equal(0, f.Exchange.LeverageLimitReads);
+        Assert.Equal(0, f.Exchange.LeverageWrites);
+        Assert.Empty(f.Exchange.Writes);
+        Assert.DoesNotContain(f.Journal.Events, entry => entry.Kind == "entry_requested");
+        Assert.Null(f.State().PendingOrder);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("[]")]
+    public async Task EmptyBingXIncomeDoesNotConfirmReconciledPositionClosure(string ledger)
+    {
+        using var f = new Fixture(TradeDirection.Long);
+        using var handler = new IncomeHttpHandler("{\"code\":0,\"data\":" + ledger + "}");
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("https://exchange.invalid") };
+        var accountApi = new BingXLiveExecutor(http, Options.Create(new BingXOptions { ApiKey = "fixture", ApiSecret = "synthetic" }),
+            NullLogger<BingXLiveExecutor>.Instance);
+        f.Exchange.PositionIncomeSource = accountApi.GetIncomeAsync;
+        using var engine = f.Create();
+        await engine.InitializeAsync(default);
+        f.Exchange.Quantity = 0;
+        f.Exchange.Orders = 0;
+
+        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => engine.ProcessAsync(f.Bar(0, 90m), default));
+
+        Assert.Contains("PnL/commission income is not yet available", error.Message);
+        Assert.Equal(IncomeHttpHandler.Income, Assert.Single(handler.Requests));
+        Assert.Single(f.State().Positions);
+        Assert.Empty(f.State().LastExits);
+        Assert.DoesNotContain(f.Journal.Events, entry => entry.Kind is "closed_income_observed" or "trade_closed");
+        Assert.Empty(f.Exchange.Writes);
+    }
+
     [Fact]
     public async Task AdvancedEntryUsesConfirmedFillAndStoresManagementIdentity()
     {
@@ -193,6 +435,7 @@ public sealed class LivePositionManagementTests
         var liveEvents = new List<TradingJournalEvent>();
         await foreach (var e in db.Store.ReadAsync(TradingMode.LIVE, DateTimeOffset.MinValue, default)) liveEvents.Add(e);
         Assert.Contains(liveEvents, e => e.Kind == "entry_requested" && e.StrategyVersion == "mtf-v1");
+        Assert.Contains(liveEvents, e => e.Kind == "entry_filled" && e.TradeId == livePosition.TradeId);
         Assert.Contains(liveEvents, e => e.Kind == "entry_protected" && e.TradeId == livePosition.TradeId);
         var paperEvents = new List<TradingJournalEvent>();
         await foreach (var e in db.Store.ReadAsync(TradingMode.PAPER, DateTimeOffset.MinValue, default)) paperEvents.Add(e);
@@ -364,6 +607,33 @@ public sealed class LivePositionManagementTests
         Assert.Equal(new[] { "replace-stop", "close" }, f.Exchange.Writes);
     }
 
+    private sealed class IncomeHttpHandler(string ledger, decimal equity = 1000m, decimal margin = 1000m,
+        HttpStatusCode? incomeStatus = HttpStatusCode.OK, decimal usedMargin = 0m, decimal frozenMargin = 0m) : HttpMessageHandler
+    {
+        public const string Balance = "/openApi/swap/v3/user/balance";
+        public const string Income = "/openApi/swap/v2/user/income";
+        public const string Commission = "/openApi/swap/v2/user/commissionRate";
+        public readonly List<string> Requests = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            var path = request.RequestUri!.AbsolutePath;
+            Requests.Add(path);
+            if (path == Income && incomeStatus is null)
+                throw new HttpRequestException("Synthetic transport failure before receiving the income response.");
+            var content = path switch
+            {
+                Balance => JsonSerializer.Serialize(new { code = 0, data = new[] { new { asset = "USDT", balance = 1000m, equity,
+                    availableMargin = margin, usedMargin, frozenMargin } } }),
+                Income => ledger,
+                Commission => """{"code":0,"data":{"commission":{"takerCommissionRate":"0.0005"}}}""",
+                _ => throw new ArgumentException($"Unexpected fixture path: {path}")
+            };
+            return Task.FromResult(new HttpResponseMessage(path == Income ? incomeStatus!.Value : HttpStatusCode.OK) { Content = new StringContent(content) });
+        }
+    }
+
     private sealed class Quotes : IBingXMarketClient
     {
         public Task<decimal?> GetSpreadBasisPointsAsync(string symbol, CancellationToken token) => Task.FromResult<decimal?>(1m);
@@ -387,7 +657,7 @@ public sealed class LivePositionManagementTests
         public readonly InMemoryCandleStore Candles = new();
         public readonly RiskOptions Risk = new() { UseDynamicPositionManagement = true, RiskPerTradePercent = 1m,
             TakeProfitRiskMultiple = 3m, FeeRate = 0m, TargetProfitUsdt = 0m, ExitCooldownBars = 6, MaximumConsecutiveLosses = 3 };
-        private string PathName => Path.Combine(_directory, "state.json");
+        public string PathName => Path.Combine(_directory, "state.json");
         public Fixture(TradeDirection direction, bool held = true)
         {
             Directory.CreateDirectory(_directory);
@@ -407,13 +677,15 @@ public sealed class LivePositionManagementTests
             for (var i = 70; i > 0; i--)
                 Candles.Upsert("BTC-USDT", TimeFrame.FiveMinutes, new(_time.AddMinutes(-i * 5), _time.AddMinutes((-i + 1) * 5), 100m, 101m, 99m, 100m, 100m, true));
         }
-        public LiveTradingEngine Create(TradingGovernance? governance = null, IBingXMarketClient? market = null, MacdOptions? macd = null)
+        public LiveTradingEngine Create(TradingGovernance? governance = null, IBingXMarketClient? market = null, MacdOptions? macd = null,
+            decimal marginUsagePercent = 100m, bool allowAdaptiveCurrent = false)
         {
             var contracts = new InMemoryContractStore();
             contracts.Upsert("BTC-USDT", new("BTC-USDT", 2, 2, 0.01m, 1m, true));
             return new(Candles, Options.Create(new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m }),
-                Options.Create(Risk), Options.Create(new LiveOptions { Enabled = true, StatePath = PathName, TakeProfitRiskMultiple = 3m,
-                    MaxMarginUsagePercent = 100m, MaximumConsecutiveApiFailures = 3, Macd = macd ?? new() }),
+                Options.Create(Risk), Options.Create(new LiveOptions { Enabled = true, AllowAdaptiveCurrentEntries = allowAdaptiveCurrent,
+                    StatePath = PathName, TakeProfitRiskMultiple = 3m,
+                    MaxMarginUsagePercent = marginUsagePercent, MaximumConsecutiveApiFailures = 3, Macd = macd ?? new() }),
                 Exchange, contracts, NullLogger<LiveTradingEngine>.Instance, Journal, governance, market);
         }
         public LiveTradingEngine.LiveState State() => JsonSerializer.Deserialize<LiveTradingEngine.LiveState>(File.ReadAllText(PathName))!;
@@ -479,23 +751,30 @@ public sealed class LivePositionManagementTests
         public string? Failure;
         public Action? OnStopFailure;
         public readonly List<string> Writes = [];
+        public int LeverageLimitReads, LeverageWrites;
         public LiveAccountSnapshot Account = new(1000m, 1000m, 1000m, 1000m, 0m, 0m);
         public LiveIncomeSnapshot Income = new(0m, 0m, 0m, 2, true, true);
+        public Func<CancellationToken, Task<LiveAccountSnapshot>>? AccountSource;
+        public Func<CancellationToken, Task>? PositionModeSource;
+        public Func<string, DateTimeOffset, CancellationToken, Task<LiveIncomeSnapshot>>? PositionIncomeSource;
         public readonly List<(DateTimeOffset From, DateTimeOffset Until)> IncomeWindows = [];
         private readonly Dictionary<string, LiveOrderFill> _fills = new();
-        public Task<LiveAccountSnapshot> GetAccountSnapshotAsync(CancellationToken token) => Task.FromResult(Account);
-        public Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, CancellationToken token) => Task.FromResult(Income);
+        public Task<LiveAccountSnapshot> GetAccountSnapshotAsync(CancellationToken token) => AccountSource?.Invoke(token) ?? Task.FromResult(Account);
+        public Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, CancellationToken token)
+            => PositionIncomeSource?.Invoke(symbol, since, token) ?? Task.FromResult(Income);
         public Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, DateTimeOffset until, CancellationToken token)
         { IncomeWindows.Add((since, until)); return Task.FromResult(Income); }
         public Task<decimal> GetMarkPriceAsync(string symbol, CancellationToken token) => Task.FromResult(Mark);
         public Task<LivePositionSnapshot> GetPositionAsync(string symbol, CancellationToken token) => Task.FromResult(new LivePositionSnapshot(PositionId, symbol, Direction, Quantity, EntryPrice));
-        public Task ValidatePositionModeAsync(CancellationToken token) => Task.CompletedTask;
+        public Task ValidatePositionModeAsync(CancellationToken token) => PositionModeSource?.Invoke(token) ?? Task.CompletedTask;
         public Task<int> GetOpenPositionCountAsync(CancellationToken token) => Task.FromResult((Quantity > 0m ? 1 : 0) + (ManualPosition ? 1 : 0));
         public Task<int> GetOpenOrderCountAsync(CancellationToken token, string? symbol = null) => Task.FromResult(Orders);
         public Task<bool> HasOpenPositionAsync(string symbol, CancellationToken token) => Task.FromResult(Quantity > 0m);
         public Task<decimal> GetAvailableBalanceUsdtAsync(CancellationToken token) => Task.FromResult(Account.AvailableMargin);
-        public Task<decimal> GetMaxLeverageAsync(string symbol, TradeDirection direction, CancellationToken token) => Task.FromResult(5m);
-        public Task SetLeverageAsync(string symbol, TradeDirection direction, decimal leverage, CancellationToken token) => Task.CompletedTask;
+        public Task<decimal> GetMaxLeverageAsync(string symbol, TradeDirection direction, CancellationToken token)
+        { LeverageLimitReads++; return Task.FromResult(5m); }
+        public Task SetLeverageAsync(string symbol, TradeDirection direction, decimal leverage, CancellationToken token)
+        { LeverageWrites++; return Task.CompletedTask; }
         public Task ValidateProtectionAsync(string symbol, TradeDirection direction, decimal quantity, CancellationToken token) => Task.CompletedTask;
         public Task<string> GetPositionHistoryAsync(string symbol, DateTimeOffset since, CancellationToken token) =>
             Task.FromResult(JsonSerializer.Serialize(new { Positions = new[] { new { positionId = PositionId } } }));

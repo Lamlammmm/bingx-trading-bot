@@ -15,6 +15,7 @@ http.createServer(async (req, res) => {
         {symbol:'BTC-USDT',asset:'USDT',incomeType:'TRADING_FEE',income:'-0.05',time:now-2400000},
         {symbol:'BTC-USDT',asset:'USDT',incomeType:'FUNDING_FEE',income:'-0.25',time:now-1200000}] };
     if (s.scenario === 'unknown-order') s.orders.push({orderId:'manual',type:'LIMIT',stopPrice:0,origQty:1});
+    if (s.scenario === 'empty-income') s.income=[];
     await pm.state.set('bingx-live-management.state',s);
     return res.end(JSON.stringify({ok:true}));
   }
@@ -28,9 +29,12 @@ http.createServer(async (req, res) => {
   else if (url.pathname === '/openApi/swap/v2/quote/premiumIndex') data={symbol:'BTC-USDT',markPrice:String(s.mark),time:Date.now()};
   else if (url.pathname === '/openApi/swap/v2/user/income') {
     data=s.income.filter(i=>(!url.searchParams.get('symbol')||i.symbol===url.searchParams.get('symbol')) && i.time>=Number(url.searchParams.get('startTime')) && i.time<=Number(url.searchParams.get('endTime')));
+    if (s.scenario === 'empty-income' && !data.length) data=null;
   } else if (url.pathname === '/openApi/swap/v3/user/balance') {
     const wallet=1000+s.income.reduce((a,i)=>a+Number(i.income),0);
-    data=[{asset:'USDT',balance:String(wallet),equity:String(wallet+(s.mark-s.entry)*s.quantity*(s.side==='LONG'?1:-1)),availableMargin:String(wallet)}];
+    const equity=wallet+(s.mark-s.entry)*s.quantity*(s.side==='LONG'?1:-1);
+    const used=s.entry*s.quantity/5;
+    data=[{asset:'USDT',balance:String(wallet),equity:String(equity),availableMargin:String(equity-used),usedMargin:String(used),frozenMargin:'0'}];
   } else if (url.pathname === '/openApi/swap/v2/user/commissionRate') data={commission:{takerCommissionRate:0.0005}};
   else if (url.pathname === '/openApi/swap/v1/trade/positionHistory') data={list:s.quantity?[]:[{positionId:s.positionId}]};
   else if (url.pathname === '/openApi/swap/v2/trade/order' && req.method === 'GET') {

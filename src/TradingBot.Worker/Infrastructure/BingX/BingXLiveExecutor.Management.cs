@@ -14,6 +14,9 @@ public sealed partial class BingXLiveExecutor
         var wallet = RequiredDecimal(balances[0], "balance");
         var equity = RequiredDecimal(balances[0], "equity");
         var available = RequiredDecimal(balances[0], "availableMargin");
+        var used = RequiredDecimal(balances[0], "usedMargin");
+        var frozen = RequiredDecimal(balances[0], "frozenMargin");
+        if (used < 0m || frozen < 0m) throw new InvalidOperationException("Invalid account margin usage.");
         var now = DateTimeOffset.UtcNow;
         var rows = await ReadIncomeAsync(null, new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero), now, cancellationToken);
         var allIncome = rows.Sum(r => RequiredDecimal(r, "income"));
@@ -22,7 +25,7 @@ public sealed partial class BingXLiveExecutor
         using var commission = await SendAsync(HttpMethod.Get, "/openApi/swap/v2/user/commissionRate", new(), cancellationToken);
         var fee = RequiredDecimal(commission.RootElement.GetProperty("data").GetProperty("commission"), "takerCommissionRate");
         if (fee < 0m || fee >= 1m) throw new InvalidOperationException("Invalid taker commission rate.");
-        return new(wallet, equity, available, wallet - allIncome, tradingIncome, fee, allIncome - tradingIncome);
+        return new(wallet, equity, available, wallet - allIncome, tradingIncome, fee, allIncome - tradingIncome, used, frozen);
     }
 
     public async Task<LiveIncomeSnapshot> GetIncomeAsync(string symbol, DateTimeOffset since, CancellationToken cancellationToken)
@@ -50,7 +53,11 @@ public sealed partial class BingXLiveExecutor
         };
         if (symbol is not null) parameters["symbol"] = symbol;
         using var document = await SendAsync(HttpMethod.Get, "/openApi/swap/v2/user/income", parameters, token);
-        var data = document.RootElement.GetProperty("data");
+        if (!document.RootElement.TryGetProperty("data", out var data) ||
+            data.ValueKind is not (JsonValueKind.Array or JsonValueKind.Null))
+            throw new InvalidOperationException("Income response has no valid ledger.");
+        // BingX returns an explicit null for a successful query with no income records.
+        if (data.ValueKind == JsonValueKind.Null) return [];
         if (data.GetArrayLength() >= 1000) throw new InvalidOperationException("Income response reached its limit; refusing an incomplete risk ledger.");
         var rows = data.EnumerateArray().Where(r => r.GetProperty("asset").GetString() == "USDT").Select(r => r.Clone()).ToArray();
         foreach (var row in rows)

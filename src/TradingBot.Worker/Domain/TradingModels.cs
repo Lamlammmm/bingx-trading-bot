@@ -137,7 +137,10 @@ public enum MarketRegime { TrendingUp, TrendingDown, Sideways, HighVolatility, L
 
 public sealed record SignalEvaluation(DateTimeOffset Time, MarketRegime Regime, string Reason,
     decimal Adx = 0m, decimal AtrPercent = 0m, decimal Ema20 = 0m, decimal Ema50 = 0m,
-    decimal Ema200 = 0m, decimal Rsi15m = 50m, string Structure = "unconfirmed");
+    decimal Ema200 = 0m, decimal Rsi15m = 50m, string Structure = "unconfirmed",
+    string? ReasonCode = null, string[]? SecondaryReasons = null, decimal? AtrValue = null,
+    decimal? RsiEntry = null, decimal? VolumeRatio = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Setup = null);
 
 public sealed record PositionMetrics(
     int TakeProfitStage = 0, decimal Mfe = 0m, decimal Mae = 0m,
@@ -155,7 +158,8 @@ public sealed record TradeMetrics(decimal InitialRiskAmount, decimal Mfe, decima
 
 public sealed record RiskControlState(decimal DayStartBalance, int ConsecutiveLosses = 0,
     DateTimeOffset? CircuitOpenUntil = null, Dictionary<string, DateTimeOffset>? LastExits = null,
-    DateTimeOffset? TradingDateTime = null);
+    DateTimeOffset? TradingDateTime = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] decimal? PeakClosedEquity = null);
 
 public sealed record StoredPaperTrade(long Id, ClosedTrade Trade, StoredTradeFeatures Features);
 

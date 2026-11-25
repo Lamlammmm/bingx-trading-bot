@@ -9,6 +9,7 @@ namespace TradingBot.Worker.Infrastructure.Persistence;
 
 public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : ITradeStore, ILiveTradeJournal
 {
+    public SignalScanStore SignalScans => new(() => new NpgsqlConnection(_connectionString));
     public ITradingResearchStore Research => new SqlTradingResearchStore(() => new NpgsqlConnection(_connectionString));
     private readonly string _connectionString = NormalizeConnectionString(options.Value.ConnectionString
         ?? throw new InvalidOperationException("Persistence:ConnectionString is required when Persistence:Provider is Postgres."));

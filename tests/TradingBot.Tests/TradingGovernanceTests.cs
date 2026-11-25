@@ -72,6 +72,43 @@ public sealed class TradingGovernanceTests
     }
 
     [Fact]
+    public async Task AdaptiveCurrentLiveRequiresPromotionAndCanRollBackToLegacy()
+    {
+        var requested = new StrategyOptions { UseMultiTimeframeAnalysis = true, UseAdaptiveCurrentEntries = true };
+        using var fixture = new ResearchFixture(requested);
+        await fixture.Governance.InitializeAsync(TradingMode.LIVE, default);
+        var legacy = await fixture.Governance.ActiveAsync(TradingMode.LIVE, default);
+        Assert.False(legacy.Configuration.Strategy.UseAdaptiveCurrentEntries);
+        Assert.True(requested.UseAdaptiveCurrentEntries);
+
+        var json = JsonSerializer.Serialize(legacy.Configuration with { Strategy = requested });
+        var candidate = legacy.Snapshot with
+        {
+            Version = "current-adaptive-test",
+            ConfigurationJson = json,
+            ConfigurationHash = TradingPolicyRuntime.Hash(json),
+            ApprovalStatus = "CANDIDATE"
+        };
+        await fixture.Store.RegisterAsync(new(candidate, "CANDIDATE", PreviousVersion: legacy.Snapshot.Version), false, default);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Store.PromoteAsync(
+            TradingMode.LIVE, candidate.Version, legacy.Snapshot.Version, "synthetic reviewer", "APPROVE", default));
+        var evidence = Evidence(candidate.ConfigurationHash);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Governance.ValidateCandidateAsync(
+            TradingMode.LIVE, candidate.Version, evidence with { ShadowPassed = false }, default));
+        await fixture.Governance.ValidateCandidateAsync(TradingMode.LIVE, candidate.Version, evidence, default);
+        var stale = await Assert.ThrowsAsync<InvalidOperationException>(() => fixture.Store.PromoteAsync(
+            TradingMode.LIVE, candidate.Version, "different-baseline", "synthetic reviewer", "APPROVE", default));
+        Assert.Contains("active baseline", stale.Message);
+        await fixture.Store.PromoteAsync(TradingMode.LIVE, candidate.Version,
+            legacy.Snapshot.Version, "synthetic reviewer", "APPROVE", default);
+        Assert.True((await fixture.Governance.ActiveAsync(TradingMode.LIVE, default)).Configuration.Strategy.UseAdaptiveCurrentEntries);
+
+        await fixture.Store.PromoteAsync(TradingMode.LIVE, legacy.Snapshot.Version,
+            candidate.Version, "synthetic reviewer", "ROLLBACK", default);
+        Assert.False((await fixture.Governance.ActiveAsync(TradingMode.LIVE, default)).Configuration.Strategy.UseAdaptiveCurrentEntries);
+    }
+
+    [Fact]
     public async Task JournalIsIdempotentAndPaperPerformanceDoesNotAuthorizeLiveRisk()
     {
         using var f = new ResearchFixture();

@@ -151,7 +151,8 @@ public sealed class LiveTradingEngineTests : IDisposable
                       payload.GetProperty("StopLoss").GetDecimal()) * 0.0005m);
                 Assert.True(estimatedLoss <= payload.GetProperty("RiskBudget").GetDecimal());
                 Assert.Equal(estimatedLoss, payload.GetProperty("EstimatedLossAtStop").GetDecimal());
-                Assert.Equal(timeout ? 1 : 3, _journal.Events.Count);
+                Assert.Equal(timeout ? 1 : 4, _journal.Events.Count);
+                Assert.Equal(!timeout, _journal.Events.Values.Any(entry => entry.Kind == "entry_filled"));
             }
         }
         if (timeout)

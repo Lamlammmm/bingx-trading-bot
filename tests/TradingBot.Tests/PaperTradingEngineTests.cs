@@ -186,6 +186,57 @@ public sealed class PaperTradingEngineTests
         Assert.Equal(0, store.AccountState.TotalLosses);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalPortfolioLimitsRejectOversizedEntryWithoutChangingCurrentPaper(bool enforcePortfolioLimits)
+    {
+        const string symbol = "BTC-USDT";
+        var now = DateTimeOffset.UtcNow;
+        var risk = Options.Create(new RiskOptions { StartingBalance = 100m, FeeRate = 0m,
+            TargetProfitUsdt = 0m, MaxAggregateExposurePercent = 1m });
+        var store = new CapturingTradeStore();
+        var contracts = new InMemoryContractStore();
+        contracts.Upsert(symbol, new ContractInfo(symbol, 4, 2, 0.0001m, 2m, true));
+        var engine = new PaperTradingEngine(new InMemoryCandleStore(), new CapturingStrategy(), new RiskManager(risk),
+            new DisabledAnalyzer(), store, contracts, risk, Options.Create(new PaperTradingOptions { SlippageBasisPoints = 0m }),
+            Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance,
+            enforcePortfolioLimits: enforcePortfolioLimits);
+        await engine.InitializeAsync(default);
+        await engine.ProcessAsync(new(symbol, TimeFrame.FiveMinutes, new Candle(now.AddMinutes(-5), now, 100m, 101m, 99m, 100m, 100m, true)), default);
+
+        Assert.Equal(enforcePortfolioLimits ? 0 : 1, store.Positions.Count);
+    }
+
+    [Fact]
+    public async Task OnlyRealizedShadowDrawdownTripsPortfolioGuardAndPeakIsPersisted()
+    {
+        const string symbol = "BTC-USDT";
+        var now = DateTimeOffset.UtcNow;
+        var risk = Options.Create(new RiskOptions { StartingBalance = 100m, FeeRate = 0m, TargetProfitUsdt = 0m,
+            MaxDailyLossPercent = 50m, MaxDrawdownPercent = 5m });
+        var store = new CapturingTradeStore(new PaperPosition(symbol, TradeDirection.Long, 1m, 100m, 90m, 120m, 10m,
+            0m, now.AddMinutes(-20)));
+        var strategy = new CapturingStrategy();
+        var contracts = new InMemoryContractStore();
+        contracts.Upsert(symbol, new ContractInfo(symbol, 4, 2, 0.0001m, 2m, true));
+        var engine = new PaperTradingEngine(new InMemoryCandleStore(), strategy, new RiskManager(risk),
+            new DisabledAnalyzer(), store, contracts, risk,
+            Options.Create(new PaperTradingOptions { SlippageBasisPoints = 0m, MaximumEntryAgeSeconds = 0 }),
+            Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance,
+            enforcePortfolioLimits: true);
+        await engine.InitializeAsync(default);
+        await engine.ProcessAsync(new(symbol, TimeFrame.FiveMinutes, new Candle(now.AddMinutes(-10), now.AddMinutes(-5),
+            100m, 101m, 89m, 90m, 100m, true)), default);
+        await engine.ProcessAsync(new(symbol, TimeFrame.FiveMinutes, new Candle(now.AddMinutes(-5), now,
+            90m, 101m, 90m, 100m, 100m, true)), default);
+
+        Assert.Equal(-10m, store.ClosedTrade?.NetPnl);
+        Assert.Equal(100m, store.AccountState?.RiskControls?.PeakClosedEquity);
+        Assert.Equal(0, strategy.Calls);
+        Assert.Empty(store.Positions);
+    }
+
     private sealed class NoSignalStrategy : ITradingStrategy
     {
         public StrategySignal? Evaluate(string symbol, IReadOnlyList<Candle> entryCandles,

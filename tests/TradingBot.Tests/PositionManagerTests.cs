@@ -101,6 +101,24 @@ public sealed class PositionManagerTests
         Assert.Equal(sign * 1m, closed.Metrics!.FundingPaid);
     }
 
+    [Theory]
+    [InlineData(TradeDirection.Long)]
+    [InlineData(TradeDirection.Short)]
+    public void SettledReplayFundingOverridesFixedFundingAndIsNotChargedOnDuplicateBars(TradeDirection direction)
+    {
+        var manager = new PositionManager(new RiskOptions { FeeRate = 0m },
+            new PaperTradingOptions { SlippageBasisPoints = 0m, FundingRatePerEightHours = 0.001m });
+        var settled = direction == TradeDirection.Long ? 2m : -2m;
+        var bar = Bar(direction, 100m, 111m, 99m, 110m);
+        var update = manager.Evaluate(Position(direction), bar, 2m, Contract, settled);
+
+        Assert.Equal(50m - settled, update.CashDelta);
+        Assert.Equal(settled, update.Position.Metrics!.FundingPaid);
+        var duplicate = manager.Evaluate(update.Position, bar, 2m, Contract, settled);
+        Assert.Equal(0m, duplicate.CashDelta);
+        Assert.Equal(settled, duplicate.Position.Metrics!.FundingPaid);
+    }
+
     [Fact]
     public void PartialRespectsMinimumNotionalAndQuantityPrecision()
     {

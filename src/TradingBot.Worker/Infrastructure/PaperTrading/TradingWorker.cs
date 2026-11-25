@@ -8,7 +8,8 @@ using TradingBot.Worker.Infrastructure.Live;
 namespace TradingBot.Worker.Infrastructure.PaperTrading;
 
 public sealed class TradingWorker(Channel<MarketUpdate> updates, PaperTradingEngine paperTrading,
-    LiveTradingEngine liveTrading, BotRuntimeState state, ILogger<TradingWorker> logger) : BackgroundService
+    LiveTradingEngine liveTrading, BotRuntimeState state, ILogger<TradingWorker> logger,
+    ShadowTradingWorker? shadowTrading = null) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -49,6 +50,7 @@ public sealed class TradingWorker(Channel<MarketUpdate> updates, PaperTradingEng
                 logger.LogError(exception, "Paper trading processing failed for {Symbol} {TimeFrame} candle at {OpenTime}",
                     update.Symbol, update.TimeFrame, update.Candle.OpenTime);
             }
+            shadowTrading?.Observe(update);
             state.Snapshot = state.Snapshot with
             {
                 ProcessedUpdates = state.Snapshot.ProcessedUpdates + 1,

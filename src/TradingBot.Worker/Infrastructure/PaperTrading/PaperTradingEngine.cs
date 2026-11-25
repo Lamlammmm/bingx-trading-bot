@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
 using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
+using TradingBot.Worker.Infrastructure;
 
 namespace TradingBot.Worker.Infrastructure.PaperTrading;
 
@@ -10,7 +11,9 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
     IOpenAiAnalyzer openAiAnalyzer, ITradeStore tradeStore, IContractStore contractStore, IOptions<RiskOptions> riskOptions,
     IOptions<PaperTradingOptions> paperTradingOptions,
     IOptions<OpenAIOptions> openAiOptions, IOptions<StrategyOptions> strategyOptions,
-    ILogger<PaperTradingEngine> logger, TradingGovernance? governance = null, IBingXMarketClient? marketClient = null)
+    ILogger<PaperTradingEngine> logger, TradingGovernance? governance = null, IBingXMarketClient? marketClient = null,
+    SignalDiagnostics? diagnostics = null, string? shadowVersion = null, string? shadowConfigurationHash = null,
+    bool enforcePortfolioLimits = false, Func<PaperPosition, Candle, decimal>? replayFunding = null)
 {
     private static readonly EventId AiTradeEvent = new(2_100, "AiTrade");
     private static readonly EventId AiNoTradeEvent = new(2_101, "AiNoTrade");
@@ -42,6 +45,8 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             _paperOptions.SlippageBasisPoints + _paperOptions.SpreadBasisPoints / 2m >= 10_000m ||
             _riskOptions.MaxOpenPositions < 0 || _riskOptions.ExitCooldownBars < 0 ||
             _riskOptions.MaximumConsecutiveLosses < 0 || _riskOptions.CircuitBreakerMinutes <= 0 ||
+            (enforcePortfolioLimits && (_riskOptions.StartingBalance <= 0m || _riskOptions.MaxDrawdownPercent <= 0m ||
+                _riskOptions.MaxAggregateExposurePercent <= 0m)) ||
             (_riskOptions.UseDynamicPositionManagement && (_riskOptions.BreakEvenTriggerR <= 0m ||
                 _riskOptions.TrailingStartR <= 0m || _riskOptions.TrailingAtrMultiplier <= 0m ||
                 _riskOptions.MinimumTrailingStepAtr < 0m || _riskOptions.StopAdjustmentCooldownBars < 0)))
@@ -98,41 +103,94 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
 
     public async Task ProcessAsync(MarketUpdate update, CancellationToken cancellationToken)
     {
+        var scan = diagnostics?.Begin(update, shadowVersion is null ? "PAPER" : "SHADOW",
+            shadowVersion is null ? "Current" : "Experimental",
+            shadowVersion ?? (governance is not null ? "unresolved" : _strategyOptions.UseAdaptiveCurrentEntries
+                ? MultiTimeframeStrategy.AdaptiveVersion : _strategyOptions.UseMultiTimeframeAnalysis ? "mtf-v1" : "breakout-v1"));
+        if (scan is not null) scan.ConfigurationHash = shadowConfigurationHash;
+        try
+        {
+            await ProcessCoreAsync(update, scan, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            scan?.Fail(exception);
+            throw;
+        }
+        finally
+        {
+            if (scan is not null) diagnostics!.Record(scan);
+        }
+    }
+
+    private async Task ProcessCoreAsync(MarketUpdate update, SignalScan? scan, CancellationToken cancellationToken)
+    {
         if (_persistenceFailed) throw new InvalidOperationException("Paper persistence failed; reload persisted state before processing more bars.");
         var symbol = update.Symbol;
         candleStore.Upsert(symbol, update.TimeFrame, update.Candle);
         if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed) return;
         var key = (symbol, update.TimeFrame);
-        if (_lastProcessedCandles.TryGetValue(key, out var lastProcessedCandle) && update.Candle.OpenTime <= lastProcessedCandle) return;
+        if (_lastProcessedCandles.TryGetValue(key, out var lastProcessedCandle) && update.Candle.OpenTime <= lastProcessedCandle)
+        {
+            scan?.Reject("DUPLICATE_CANDLE");
+            return;
+        }
         _lastProcessedCandles[key] = update.Candle.OpenTime;
         await ResetDailyStateIfNeededAsync(update.Candle.CloseTime, cancellationToken);
 
         var position = _positionsBySymbol.GetValueOrDefault(symbol);
         if (position is not null)
         {
+            if (scan is not null) scan.Stage = "POSITION_MANAGEMENT";
+            scan?.Reject("POSITION_ALREADY_OPEN");
             // Never replay pre-entry prices against a new position.
             if (update.Candle.CloseTime > position.OpenedAt)
                 await TryClosePositionAsync(symbol, position, update.Candle, cancellationToken);
             return;
         }
         var active = governance is null ? null : await governance.ActiveAsync(TradingMode.PAPER, cancellationToken);
+        if (scan is not null && active is not null)
+        {
+            scan.Version = active.Snapshot.Version;
+            scan.ConfigurationHash = active.Snapshot.ConfigurationHash;
+        }
         var guardRisk = active?.Configuration.Risk ?? _riskOptions;
-        if (_lastPositionExitTimes.TryGetValue(symbol, out var lastExit) && update.Candle.CloseTime <= lastExit) return;
+        var drawdownLimitReached = enforcePortfolioLimits && _controls.PeakClosedEquity is { } peak &&
+            peak - (_riskOptions.StartingBalance + _totalNetPnl) >= peak * _riskOptions.MaxDrawdownPercent / 100m;
+        if (_lastPositionExitTimes.TryGetValue(symbol, out var lastExit) && update.Candle.CloseTime <= lastExit)
+        {
+            scan?.Reject("PREVIOUS_POSITION_CANDLE");
+            return;
+        }
         if (_paperOptions.MaximumEntryAgeSeconds > 0 &&
             (DateTimeOffset.UtcNow - update.Candle.CloseTime > TimeSpan.FromSeconds(_paperOptions.MaximumEntryAgeSeconds) ||
-             update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10))) return;
+             update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10)))
+        {
+            scan?.Reject("STALE_MARKET_DATA");
+            return;
+        }
         var guardReason = _lastPositionExitTimes.TryGetValue(symbol, out var exitTime) &&
             update.Candle.OpenTime - exitTime < TimeSpan.FromMinutes(5 * guardRisk.ExitCooldownBars) ? "post-exit cooldown"
             : _controls.CircuitOpenUntil is { } circuitUntil && update.Candle.CloseTime < circuitUntil ? "consecutive-loss circuit breaker"
             : _riskOptions.MaxOpenPositions > 0 && _positionsBySymbol.Values.Count(p => p is not null) >= _riskOptions.MaxOpenPositions ? "position limit reached"
-            : _realizedPnlToday <= -_controls.DayStartBalance * _riskOptions.MaxDailyLossPercent / 100m ? "daily loss budget exhausted" : null;
+            : _realizedPnlToday <= -_controls.DayStartBalance * _riskOptions.MaxDailyLossPercent / 100m ? "daily loss budget exhausted"
+            : drawdownLimitReached ? "drawdown limit reached" : null;
         if (guardReason is not null)
         {
+            scan?.Reject(guardReason switch
+            {
+                "post-exit cooldown" => "COOLDOWN_ACTIVE",
+                "consecutive-loss circuit breaker" => "LOSS_CIRCUIT_OPEN",
+                "position limit reached" => "MAX_POSITION_REACHED",
+                "drawdown limit reached" => "DRAWDOWN_LIMIT",
+                _ => "DAILY_LOSS_LIMIT"
+            });
             logger.LogInformation(RuleRejectedEvent, "PAPER NO TRADE {Symbol} | dataTime={DataTime} | reason={Reason}", symbol, update.Candle.CloseTime, guardReason);
             return;
         }
         if (update.IsReconciliation)
         {
+            scan?.Reject("RECONCILIATION_ONLY");
             logger.LogInformation("Skipping new entry on reconciled closed 5m candle for {Symbol} at {OpenTime}",
                 symbol, update.Candle.OpenTime);
             return;
@@ -146,7 +204,9 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         var higherTrendCandles = candleStore.Get(symbol, TimeFrame.OneHour)
             .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
         var signalStrategy = active?.Strategy ?? strategy;
+        if (scan is not null) scan.Stage = "STRATEGY";
         var technicalSignal = signalStrategy.Evaluate(symbol, entryCandles, mediumTrendCandles, higherTrendCandles);
+        scan?.Observe(technicalSignal, signalStrategy.LastEvaluation);
         if (signalStrategy.LastEvaluation is { } evaluation)
             logger.LogInformation("SIGNAL EVALUATION {Symbol} | timeframe=5m | dataTime={DataTime} | regime={Regime} | ADX1h={Adx} | ATR1hPercent={AtrPercent} | EMAfast1h={EmaFast} | EMAslow1h={EmaSlow} | EMAprimary1h={EmaPrimary} | RSI15m={Rsi} | structure30m={Structure} | reason={Reason}",
                 symbol, evaluation.Time, evaluation.Regime, evaluation.Adx, evaluation.AtrPercent,
@@ -168,20 +228,34 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         var signal = technicalSignal;
         if (openAiAnalyzer.Enabled)
         {
+            if (scan is not null) scan.Stage = "AI_CONFIRMATION";
             var result = await openAiAnalyzer.AnalyzeAsync(new AiAnalysisContext(symbol, update.Candle.CloseTime,
                 entryCandles, mediumTrendCandles, higherTrendCandles, technicalSignal), cancellationToken);
             signal = BuildAiSignal(result, technicalSignal, update.Candle, symbol);
-            if (signal is null) return;
+            if (signal is null)
+            {
+                if (result.Decision is null) scan?.Fail("AI_ANALYSIS_ERROR");
+                else scan?.Reject("AI_FILTER_REJECTED");
+                return;
+            }
+            scan?.Observe(signal, signalStrategy.LastEvaluation);
         }
         if (signal is null) return;
         if (_paperOptions.Macd.Enabled)
         {
+            if (scan is not null) scan.Stage = "MACD_CONFIRMATION";
             var macd = MacdEntryFilter.Evaluate(entryCandles, signal, update.TimeFrame, _paperOptions.Macd);
+            if (scan is not null) scan.Macd = macd;
             MacdEntryFilter.Log(logger, "PAPER", signal, macd);
-            if (!macd.Allowed) return;
+            if (!macd.Allowed)
+            {
+                scan?.Reject("MACD_FILTER_REJECTED");
+                return;
+            }
             signal = signal with { Macd = macd };
         }
 
+        if (scan is not null) scan.Stage = "ACCOUNT_AND_RISK";
         var decision = new AdaptiveDecision(true, 1m, "configured risk policy");
         var signalId = "sig-" + TradingPolicyRuntime.Hash($"{symbol}|5m|{signal.Time.ToUnixTimeMilliseconds()}|{active?.Snapshot.ConfigurationHash}")[..32];
         if (active is not null)
@@ -189,13 +263,19 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             var spread = marketClient is null ? null : await marketClient.GetSpreadBasisPointsAsync(symbol, cancellationToken);
             decision = await governance!.DecideAsync(active, signal.Evaluation?.Regime ?? MarketRegime.Unknown, spread, cancellationToken);
             await governance.SignalAsync(active.Snapshot, signalId, signal, decision, cancellationToken);
-            if (!decision.AllowEntry) return;
+            if (!decision.AllowEntry)
+            {
+                scan?.Reject("ADAPTIVE_GUARD");
+                if (scan is not null) scan.RejectionDetails = decision.Reason;
+                return;
+            }
         }
 
         var aggregateOpenRisk = _positionsBySymbol.Values.Where(p => p is not null).Sum(p => p!.RiskAmount);
         var contract = contractStore.Get(symbol);
         if (contract is null)
         {
+            scan?.Reject("CONTRACT_UNAVAILABLE");
             logger.LogWarning(RuleRejectedEvent,
                 "========== TRADE REJECTED ========== {Symbol} | reason=contract metadata is unavailable",
                 symbol);
@@ -215,19 +295,36 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
                 Math.Max(0m, _balance - usedMargin), aggregateOpenRisk, aggregateNotional, contract, entryRisk.MaxLeverage, decision.RiskMultiplier);
         if (plan is null)
         {
+            scan?.Reject("RISK_PLAN_REJECTED");
+            if (scan is not null && active is null) scan.RejectionDetails = riskManager.LastRejectionReason;
             logger.LogWarning(RuleRejectedEvent,
                 "========== TRADE REJECTED BY RISK MANAGER ========== {Symbol} | Direction={Direction} | Entry={Entry} | Source={Source} | Reason={Reason}",
                 symbol, signal.Direction, signal.EntryPrice, signal.Source, riskManager.LastRejectionReason ?? signal.Reason);
             return;
         }
+        if (enforcePortfolioLimits &&
+            aggregateNotional + plan.EntryPrice * plan.Quantity > _balance * _riskOptions.MaxAggregateExposurePercent / 100m)
+        {
+            scan?.Reject("EXPOSURE_LIMIT");
+            logger.LogInformation(RuleRejectedEvent, "PAPER NO TRADE {Symbol} | reason={Reason}", symbol, "portfolio exposure limit reached");
+            return;
+        }
         if (plan.EntryPrice * plan.Quantity / entryRisk.MaxLeverage + plan.EntryFee > _balance - usedMargin)
         {
+            scan?.Reject("INSUFFICIENT_MARGIN");
             logger.LogWarning(RuleRejectedEvent, "PAPER NO TRADE {Symbol} | reason={Reason}", symbol, "insufficient free margin after existing paper positions");
             return;
         }
 
         var context = active is null ? null : new TradingContext(active.Snapshot, signalId, "paper-" + Guid.NewGuid().ToString("N"),
             entryRisk.MaxLeverage, _balance, signal.Reason);
+        scan?.Accept(plan.EntryPrice, plan.StopLoss, plan.TakeProfit, plan.NetRewardRiskRatio);
+        if (scan is not null)
+        {
+            scan.OrderId = context?.TradeId ?? (shadowVersion is not null ? "shadow-" + scan.Id : null);
+            scan.ExecutionStatus = "ATTEMPTED";
+            scan.Stage = "SIMULATED_FILL";
+        }
         if (context is not null)
             _journalEvents.Add(new(TradingMode.PAPER, context.TradeId + ":open", context.TradeId, signalId, active!.Snapshot.Version,
                 active.Snapshot.ConfigurationHash, symbol, "entry_filled", signal.Time, System.Text.Json.JsonSerializer.Serialize(new { Context = context, Plan = plan })));
@@ -244,12 +341,20 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
         logger.LogWarning("========== PAPER OPEN {Direction} ========== {Quantity} {Symbol} @ {Entry}; SL={StopLoss}; TP={TakeProfit}; risk={Risk}; netRewardRisk={NetRewardRisk}; source={Source}; reason={Reason}",
             plan.Direction, plan.Quantity, plan.Symbol, plan.EntryPrice, plan.StopLoss, plan.TakeProfit, plan.RiskAmount, plan.NetRewardRiskRatio, signal.Source, plan.Reason);
         await SaveAccountStateAsync(cancellationToken);
+        if (scan is not null)
+        {
+            scan.ExecutionStatus = "FILLED";
+            scan.FilledAt = signal.Time.ToUniversalTime();
+        }
     }
 
     private async Task SaveAccountStateAsync(CancellationToken cancellationToken, ClosedTrade? closedTrade = null)
     {
         try
         {
+            if (enforcePortfolioLimits)
+                _controls = _controls with { PeakClosedEquity = Math.Max(_controls.PeakClosedEquity ?? _riskOptions.StartingBalance,
+                    _riskOptions.StartingBalance + _totalNetPnl) };
             var account = new AccountState(_balance, _balanceDate, _realizedPnlToday, _totalWins, _totalLosses, _totalNetPnl,
                 _controls with { LastExits = new(_lastPositionExitTimes) });
             var positions = _positionsBySymbol.Values.Where(p => p is not null).Select(p => p!).ToArray();
@@ -365,7 +470,7 @@ public sealed class PaperTradingEngine(ICandleStore candleStore, ITradingStrateg
             ? TechnicalIndicators.AggregateClosed(closedCandles, 15) : closedCandles, _strategyOptions.AtrPeriod);
         var pinned = position.Metrics?.Context?.Strategy is { } snapshot ? governance?.Pinned(snapshot) : null;
         var manager = pinned is null ? _positionManager : new PositionManager(pinned.Configuration.Risk, pinned.Configuration.Costs);
-        var transition = manager.Evaluate(position, candle, atr, contractStore.Get(symbol));
+        var transition = manager.Evaluate(position, candle, atr, contractStore.Get(symbol), replayFunding?.Invoke(position, candle));
         _balance += transition.CashDelta;
         _realizedPnlToday += transition.CashDelta;
         _positionsBySymbol[symbol] = transition.IsClosed ? null : transition.Position;

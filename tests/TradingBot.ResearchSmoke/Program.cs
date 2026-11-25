@@ -82,13 +82,46 @@ try
     if ((await store.GetActiveAsync(TradingMode.LIVE, default))!.Snapshot.Version != candidate.Version) throw new Exception("Approved promotion failed"); checks++;
     await store.PromoteAsync(TradingMode.LIVE, current.Snapshot.Version, candidate.Version, "synthetic integration fixture", "ROLLBACK", default);
     if ((await store.GetActiveAsync(TradingMode.LIVE, default))!.Snapshot.Version != current.Snapshot.Version) throw new Exception("Rollback failed"); checks++;
+
+    var scans = new SignalScanStore(() => new NpgsqlConnection(builder.ConnectionString));
+    await scans.InitializeAsync(default);
+    await scans.InitializeAsync(default);
+    var update = new MarketUpdate("BTC-USDT", TimeFrame.FiveMinutes,
+        new Candle(now.AddMinutes(-5), now, 100m, 102m, 98m, 100m, 1m, true));
+    var scan = new SignalScan(update, "LIVE", "Current", current.Snapshot.Version);
+    scan.Reject("NO_VALID_SETUP");
+    await scans.AppendAsync([scan], default);
+    await scans.AppendAsync([scan], default);
+    var filter = new SignalScanFilter(now.AddHours(-1), now.AddHours(1), "BTC-USDT", "5m", "LIVE", "Current", null, null, null);
+    var history = await scans.HistoryAsync(filter, 25, 0, default);
+    if (history.Count != 1 || history[0].GetProperty("primaryReason").GetString() != "NO_VALID_SETUP")
+        throw new Exception("Diagnostics append, filtering or duplicate handling failed.");
+    checks++;
+    var report = JsonSerializer.SerializeToElement(await scans.OverviewAsync(filter, default));
+    if (report.GetProperty("Total").GetProperty("RejectedSignals").GetInt64() != 1)
+        throw new Exception("Diagnostics aggregate did not match history.");
+    checks++;
+    var candidateSignal = new StrategySignal(update.Symbol, TradeDirection.Long, now, 100m, 1m, "fixture");
+    var firstSetup = new SignalScan(update, "SHADOW", "Experimental", "fixture") { ConfigurationHash = "current-fixture" };
+    var duplicateSetup = new SignalScan(update, "SHADOW", "Experimental", "fixture") { ConfigurationHash = "current-fixture" };
+    var oldSetup = new SignalScan(update, "SHADOW", "Experimental", "fixture") { ConfigurationHash = "other-fixture" };
+    foreach (var setup in new[] { firstSetup, duplicateSetup, oldSetup }) setup.Observe(candidateSignal, null);
+    await scans.AppendAsync([firstSetup, duplicateSetup, oldSetup], default);
+    var days = await scans.SetupDaysAsync(now.AddHours(-1), now.AddHours(1), "SHADOW", "current-fixture", default);
+    if (days.Values.Sum(d => d.Scans) != 2 || days.Values.Sum(d => d.Setups) != 1)
+        throw new Exception("Diagnostics period setup counts did not deduplicate or scope by configuration.");
+    checks++;
+    await scans.RetainAsync(now.AddHours(1), default);
+    if ((await scans.HistoryAsync(filter, 25, 0, default)).Count != 0)
+        throw new Exception("Diagnostics retention failed.");
+    checks++;
     await using (var verify = new NpgsqlConnection(builder.ConnectionString))
     {
         await verify.OpenAsync();
         await using var command = verify.CreateCommand(); command.CommandText = "SELECT COUNT(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relrowsecurity";
-        if (Convert.ToInt32(await command.ExecuteScalarAsync()) != 5) throw new Exception("RLS was not enabled on all five tables"); checks++;
+        if (Convert.ToInt32(await command.ExecuteScalarAsync()) != 6) throw new Exception("RLS was not enabled on all six tables"); checks++;
     }
-    Console.WriteLine($"PASS {target}: {checks} checks, PAPER/LIVE separated, duplicate-safe journal, candidate/approval gates, rollback and five RLS tables. Synthetic fixtures only.");
+    Console.WriteLine($"PASS {target}: {checks} checks covering journal, approval, rollback, diagnostics and RLS. Synthetic fixtures only.");
 }
 catch (Exception error)
 {

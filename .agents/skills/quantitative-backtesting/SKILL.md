@@ -1,0 +1,13 @@
+---
+name: quantitative-backtesting
+description: Validate historical candles, run reproducible Current versus Experimental replays, and assess out-of-sample results, trading costs, uncertainty, and drawdown in this bot.
+---
+
+# Quantitative backtesting
+
+1. Read `docs/strategy-replay-validation.md` and use the existing `tools/download-history.ps1` and `tools/TradingBot.Backtest`. Freeze the baseline and candidate configuration, data cutoff, symbol set, rejection criteria and assumptions before comparing. Record SHA-256, UTC bounds, coverage, exact CLI arguments and versions. Check OHLCV, timestamps, duplicates, gaps, market-session coverage and contract metadata. Reject incomplete samples or report their exclusions and effect. Check whether the current symbol list introduces survivorship bias.
+2. Compare on the same data, equity, risk rules, broker assumptions and warm-up. Admit higher-timeframe candles only after they close. Check that indicator state, open positions and parameter fitting do not leak across splits. Use chronological train/validation/test, or fit only on past data for each walk-forward fold. Do not sum overlapping windows as independent evidence. State whether each holdout was genuinely unseen or selected retrospectively.
+3. Report trade count, directional setup observations, sample windows, expectancy, profit factor, net PnL, costs and drawdown after fees. Break down major contributions by regime and symbol. Separate pooled portfolio equity from a sum of independent symbol accounts, and marked drawdown from realized drawdown. Describe fees, spread, slippage, funding and fill timing. Check sensitivity to execution delay, next-open pricing and adverse costs when supported. If the cost gate removes all entries, report that the stress scenario has no return sample.
+4. Require evidence for claims of improvement. Prefer paired net outcomes versus Current on identical time blocks. Where there are enough dates, trades and regimes, use a block bootstrap or Monte Carlo on dependent time blocks that preserve common symbol movements. Specify sampling unit, block length, seed and uncertainty; check sensitivity to block length and the number of variants tried. Use exploratory language when the effective sample is too small. See [The Probability of Backtest Overfitting](https://escholarship.org/uc/item/4w1110bb) and [The Stationary Bootstrap](https://doi.org/10.1080/01621459.1994.10476870).
+
+Deliver a reproducible artifact, assumptions and a conclusion scoped to the evidence. Record all trials, including rejected strategies. Research results belong in an isolated replay or Shadow evaluation and confer no approval to change trading configuration or place orders.

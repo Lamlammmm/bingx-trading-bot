@@ -28,7 +28,15 @@ public sealed class TradingGovernance(ITradingResearchStore store, IOptions<Stra
                 r.RiskPerTradePercent = live.Value.RiskPerTradePercent ?? r.RiskPerTradePercent;
                 r.MaxLeverage = Math.Min(r.MaxLeverage, live.Value.MaxLeverage);
             }
-            var configuration = new TradingConfiguration(strategy.Value, r, costs.Value, adaptive.Value);
+            var entryOptions = strategy.Value;
+            if (mode == TradingMode.LIVE && entryOptions.UseAdaptiveCurrentEntries)
+            {
+                // Bootstrap is not evidence or operator approval of the adaptive entry policy.
+                entryOptions = JsonSerializer.Deserialize<StrategyOptions>(JsonSerializer.Serialize(entryOptions))!;
+                entryOptions.UseAdaptiveCurrentEntries = false;
+                logger.LogWarning("Bootstrapping legacy Current for Live. Adaptive Current requires a validated and approved policy.");
+            }
+            var configuration = new TradingConfiguration(entryOptions, r, costs.Value, adaptive.Value);
             ValidateConfiguration(configuration);
             var json = JsonSerializer.Serialize(configuration);
             var snapshot = new StrategySnapshot(mode, adaptive.Value.BootstrapVersion, TradingPolicyRuntime.Hash(json), DateTimeOffset.UtcNow,
@@ -47,7 +55,15 @@ public sealed class TradingGovernance(ITradingResearchStore store, IOptions<Stra
         var key = (mode, registration.Snapshot.Version + registration.Snapshot.EffectiveAt.UtcTicks + registration.Snapshot.ConfigurationHash);
         return _policies.GetOrAdd(key, _ =>
         {
-            var policy = new TradingPolicyRuntime(registration.Snapshot); ValidateConfiguration(policy.Configuration); return policy;
+            var policy = new TradingPolicyRuntime(registration.Snapshot);
+            ValidateConfiguration(policy.Configuration);
+            if (mode == TradingMode.LIVE && policy.Configuration.Strategy.UseAdaptiveCurrentEntries)
+            {
+                if (string.IsNullOrWhiteSpace(registration.ApprovedBy))
+                    throw new InvalidOperationException("Live adaptive Current requires explicit operator approval.");
+                TradingPolicyRuntime.ValidateEvidence(registration);
+            }
+            return policy;
         });
     }
 

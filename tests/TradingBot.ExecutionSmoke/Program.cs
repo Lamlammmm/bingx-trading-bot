@@ -11,6 +11,22 @@ if (!uri.IsLoopback || uri.Scheme != "http") throw new InvalidOperationException
 if (args.Contains("--management")) { await LiveManagementSmoke.RunAsync(uri); return; }
 using var control = new HttpClient { BaseAddress = uri };
 control.DefaultRequestHeaders.Add("x-mock-slug", "bingx");
+if (args.Contains("--empty-income"))
+{
+    using var reset = await control.PostAsync("__reset?scenario=empty-income", null);
+    reset.EnsureSuccessStatusCode();
+    var executor = new BingXLiveExecutor(control, Options.Create(new BingXOptions
+    {
+        ApiKey = "synthetic-key", ApiSecret = "synthetic-secret"
+    }), NullLogger<BingXLiveExecutor>.Instance);
+    var snapshot = await executor.GetAccountSnapshotAsync(default);
+    if (snapshot.DayStartBalance != 1000m || snapshot.NetTradingIncomeToday != 0m ||
+        snapshot.ExternalIncomeToday != 0m || snapshot.Equity != 1012m || snapshot.TakerFeeRate != 0.0005m ||
+        snapshot.AvailableMargin != 992m || snapshot.UsedMargin != 20m || snapshot.FrozenMargin != 0m)
+        throw new InvalidOperationException("Empty BingX income response produced an incorrect risk snapshot.");
+    Console.WriteLine("PASS HTTP empty-income: confirmed zero cash flows, preserved equity, margin and commission");
+    return;
+}
 foreach (var scenario in new[] { "success", "rate-limit", "business-error", "html-error", "timeout-after-write" })
 {
     (await control.PostAsync($"__scenario?name={scenario}", null)).EnsureSuccessStatusCode();

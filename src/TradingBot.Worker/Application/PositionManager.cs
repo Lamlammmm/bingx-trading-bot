@@ -40,7 +40,8 @@ public sealed class PositionManager(RiskOptions risk, PaperTradingOptions costs)
         }
         return results;
     }
-    public PositionTransition Evaluate(PaperPosition position, Candle candle, decimal atr, ContractInfo? contract)
+    public PositionTransition Evaluate(PaperPosition position, Candle candle, decimal atr, ContractInfo? contract,
+        decimal? settledFunding = null)
     {
         var metrics = position.Metrics ?? new PositionMetrics();
         if (!candle.IsClosed || candle.OpenTime < position.OpenedAt ||
@@ -58,7 +59,7 @@ public sealed class PositionManager(RiskOptions risk, PaperTradingOptions costs)
         var lastFundingTime = metrics.LastEvaluatedAt ?? position.OpenedAt;
         // Scenario: fixed rate at UTC 00/08/16 boundaries, charged to quantity held before this bar's exits.
         var fundingPeriods = Math.Max(0L, candle.CloseTime.ToUnixTimeMilliseconds() / 28_800_000L - lastFundingTime.ToUnixTimeMilliseconds() / 28_800_000L);
-        var funding = position.EntryPrice * quantity * costs.FundingRatePerEightHours * fundingPeriods * sign;
+        var funding = settledFunding ?? position.EntryPrice * quantity * costs.FundingRatePerEightHours * fundingPeriods * sign;
         cashDelta -= funding;
         partialPnl -= funding;
         metrics = metrics with { FundingPaid = metrics.FundingPaid + funding, LastEvaluatedAt = candle.CloseTime };

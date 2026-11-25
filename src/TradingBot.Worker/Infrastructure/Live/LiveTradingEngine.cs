@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using TradingBot.Worker.Application;
 using TradingBot.Worker.Configuration;
 using TradingBot.Worker.Domain;
+using TradingBot.Worker.Infrastructure;
 
 namespace TradingBot.Worker.Infrastructure.Live;
 
@@ -31,9 +32,13 @@ public sealed partial class LiveTradingEngine : IDisposable
     private bool _exchangeChecked;
     private readonly TradingGovernance? _governance;
     private readonly IBingXMarketClient? _marketClient;
+    private readonly SignalDiagnostics? _diagnostics;
+    private SavedPosition[] _savedPositions = [];
 
     public bool IsReady => !_options.Enabled || (_initialized && _state.PendingOrder is null &&
         (_state.ApiCircuitUntil is null || DateTimeOffset.UtcNow >= _state.ApiCircuitUntil));
+
+    internal IReadOnlyList<SavedPosition>? PositionsForMonitoring => IsReady ? Volatile.Read(ref _savedPositions) : null;
 
     public sealed record SavedPosition(string Symbol, TradeDirection Direction, decimal Quantity,
         decimal StopLoss, decimal TakeProfit, DateTimeOffset OpenedAt, string? TradeId = null,
@@ -63,7 +68,8 @@ public sealed partial class LiveTradingEngine : IDisposable
 
     public LiveTradingEngine(ICandleStore candleStore, IOptions<StrategyOptions> strategyOptions,
         IOptions<RiskOptions> riskOptions, IOptions<LiveOptions> liveOptions, ILiveExecutor executor, IContractStore contractStore,
-        ILogger<LiveTradingEngine> logger, ILiveTradeJournal journal, TradingGovernance? governance = null, IBingXMarketClient? marketClient = null)
+        ILogger<LiveTradingEngine> logger, ILiveTradeJournal journal, TradingGovernance? governance = null,
+        IBingXMarketClient? marketClient = null, SignalDiagnostics? diagnostics = null)
     {
         _candles = candleStore;
         _strategy = strategyOptions.Value.UseMultiTimeframeAnalysis ? new MultiTimeframeStrategy(strategyOptions) : new BreakoutStrategy(strategyOptions);
@@ -77,7 +83,9 @@ public sealed partial class LiveTradingEngine : IDisposable
         _riskPerTradePercent = _options.RiskPerTradePercent ?? _riskOptions.RiskPerTradePercent;
         _riskManager = new RiskManager(riskOptions);
         _governance = governance; _marketClient = marketClient;
-        _advanced = governance is not null || strategyOptions.Value.UseMultiTimeframeAnalysis || riskOptions.Value.UseDynamicPositionManagement;
+        _diagnostics = diagnostics;
+        _advanced = governance is not null || strategyOptions.Value.UseMultiTimeframeAnalysis ||
+            strategyOptions.Value.UseAdaptiveCurrentEntries || riskOptions.Value.UseDynamicPositionManagement;
         _liveRisk = JsonSerializer.Deserialize<RiskOptions>(JsonSerializer.Serialize(_riskOptions))!;
         _liveRisk.RiskPerTradePercent = _riskPerTradePercent;
         _liveRisk.StopAtrMultiplier = _options.StopAtrMultiplier;
@@ -225,25 +233,44 @@ public sealed partial class LiveTradingEngine : IDisposable
         }
     }
 
-    private async Task ProcessCoreAsync(MarketUpdate update, CancellationToken cancellationToken)
+    private async Task ProcessCoreAsync(MarketUpdate update, SignalScan? scan, CancellationToken cancellationToken)
     {
         if (!_options.Enabled) return;
         if (!_initialized) throw new InvalidOperationException("Live initialization has not completed.");
-        if (_state.PendingOrder is not null) return;
-        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed || update.IsReconciliation) return;
-        if (DateTimeOffset.UtcNow - update.Candle.CloseTime > TimeSpan.FromMinutes(2)) return;
-        if (update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10)) return;
-        if (_lastProcessed.TryGetValue(update.Symbol, out var last) && update.Candle.OpenTime <= last) return;
-        _lastProcessed[update.Symbol] = update.Candle.OpenTime;
-
-        await ReconcileAsync(cancellationToken, update.Symbol);
-        if (_advanced)
+        if (_state.PendingOrder is not null) { scan?.Reject("PENDING_ORDER_RECONCILIATION"); return; }
+        if (update.TimeFrame != TimeFrame.FiveMinutes || !update.Candle.IsClosed) return;
+        if (update.IsReconciliation) { scan?.Reject("RECONCILIATION_ONLY"); return; }
+        if (DateTimeOffset.UtcNow - update.Candle.CloseTime > TimeSpan.FromMinutes(2) ||
+            update.Candle.CloseTime > DateTimeOffset.UtcNow.AddSeconds(10))
         {
-            await ProcessAdvancedAsync(update, cancellationToken);
+            scan?.Reject("STALE_MARKET_DATA");
             return;
         }
-        if (_state.Positions.Any(p => string.Equals(p.Symbol, update.Symbol, StringComparison.OrdinalIgnoreCase))) return;
-        if (_options.MaxOpenPositions > 0 && _state.Positions.Count >= _options.MaxOpenPositions) return;
+        if (_lastProcessed.TryGetValue(update.Symbol, out var last) && update.Candle.OpenTime <= last)
+        {
+            scan?.Reject("DUPLICATE_CANDLE");
+            return;
+        }
+        _lastProcessed[update.Symbol] = update.Candle.OpenTime;
+
+        if (scan is not null) scan.Stage = "POSITION_RECONCILIATION";
+        await ReconcileAsync(cancellationToken, update.Symbol);
+        if (scan is not null) scan.Stage = "ENTRY_GUARDS";
+        if (_advanced)
+        {
+            await ProcessAdvancedAsync(update, scan, cancellationToken);
+            return;
+        }
+        if (_state.Positions.Any(p => string.Equals(p.Symbol, update.Symbol, StringComparison.OrdinalIgnoreCase)))
+        {
+            scan?.Reject("POSITION_ALREADY_OPEN");
+            return;
+        }
+        if (_options.MaxOpenPositions > 0 && _state.Positions.Count >= _options.MaxOpenPositions)
+        {
+            scan?.Reject("MAX_POSITION_REACHED");
+            return;
+        }
         // The shared store may already contain newer queued bars. Evaluate and journal only this candle's context.
         var entryCandles = _candles.Get(update.Symbol, TimeFrame.FiveMinutes)
             .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
@@ -251,14 +278,25 @@ public sealed partial class LiveTradingEngine : IDisposable
             .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
         var higherTrendCandles = _candles.Get(update.Symbol, TimeFrame.OneHour)
             .Where(candle => candle.IsClosed && candle.CloseTime <= update.Candle.CloseTime).ToArray();
-        var signal = ConfirmMacd(_strategy.Evaluate(update.Symbol, entryCandles, mediumTrendCandles, higherTrendCandles), entryCandles, update.TimeFrame);
+        var signal = _strategy.Evaluate(update.Symbol, entryCandles, mediumTrendCandles, higherTrendCandles);
+        scan?.Observe(signal, _strategy.LastEvaluation);
+        signal = ConfirmMacd(signal, entryCandles, update.TimeFrame, scan);
         if (signal is null) return;
+        if (scan is not null) scan.Stage = "ACCOUNT_AND_RISK";
         var contract = _contracts.Get(update.Symbol);
-        if (contract is null || !contract.IsActive || signal.EntryPrice <= 0m || signal.Atr <= 0m) return;
+        if (contract is null || !contract.IsActive || signal.EntryPrice <= 0m || signal.Atr <= 0m)
+        {
+            scan?.Reject(contract is null || !contract.IsActive ? "CONTRACT_UNAVAILABLE" : "INVALID_SIGNAL");
+            return;
+        }
         if (await _executor.HasOpenPositionAsync(update.Symbol, cancellationToken) ||
-            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0) return;
+            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0)
+        {
+            scan?.Reject("EXCHANGE_EXPOSURE");
+            return;
+        }
         var balance = await _executor.GetAvailableBalanceUsdtAsync(cancellationToken);
-        if (balance <= 0m) return;
+        if (balance <= 0m) { scan?.Reject("INSUFFICIENT_MARGIN"); return; }
         if (contract.QuantityPrecision < 0m || contract.QuantityPrecision > 28m ||
             contract.QuantityPrecision != decimal.Truncate(contract.QuantityPrecision))
             throw new InvalidOperationException("Invalid contract quantity precision.");
@@ -266,6 +304,8 @@ public sealed partial class LiveTradingEngine : IDisposable
             _options.TakeProfitRiskMultiple, out var rejectionReason);
         if (protection is null)
         {
+            scan?.Reject("PROTECTION_REJECTED");
+            if (scan is not null) scan.RejectionDetails = rejectionReason;
             _logger.LogWarning("LIVE SKIPPED {Symbol} | reason={Reason} | entry={Entry} | atr={Atr} | invalidation={Invalidation} | minimumNetRR={MinimumNetRR}",
                 update.Symbol, rejectionReason, signal.EntryPrice, signal.Atr, signal.InvalidationPrice,
                 _riskOptions.MinimumNetRewardRiskRatio);
@@ -287,6 +327,7 @@ public sealed partial class LiveTradingEngine : IDisposable
             leverage = Math.Min(leverage, maximum);
         else if (leverage > maximum)
         {
+            scan?.Reject("LEVERAGE_UNAVAILABLE");
             _logger.LogWarning("LIVE SKIPPED {Symbol} | configuredLeverage={Required} exceeds maxLeverage={Maximum}",
                 update.Symbol, leverage, maximum);
             return;
@@ -297,6 +338,7 @@ public sealed partial class LiveTradingEngine : IDisposable
             (int)contract.QuantityPrecision, MidpointRounding.ToZero);
         if (quantity <= 0m || quantity < contract.MinimumQuantity || quantity * signal.EntryPrice < contract.MinimumOrderValue)
         {
+            scan?.Reject("CONTRACT_MINIMUM");
             _logger.LogWarning("LIVE SKIPPED {Symbol} | balance={Balance} | quantity={Quantity} | minQty={MinQty} | minValue={MinValue} | riskBudget={RiskBudget} | marginBudget={MarginBudget} | entry={Entry} | stopDistance={StopDistance} | leverage={Leverage} | riskQuantity={RiskQuantity} | marginQuantity={MarginQuantity} | limitedBy={LimitedBy}",
                 update.Symbol, balance, quantity, contract.MinimumQuantity, contract.MinimumOrderValue,
                 riskBudget, marginBudget, signal.EntryPrice, distance, leverage, riskQuantity, maximumQuantityForMargin,
@@ -308,7 +350,13 @@ public sealed partial class LiveTradingEngine : IDisposable
             update.Symbol, riskBudget, distance, leverage, quantity, quantity * signal.EntryPrice, balance, marginBudget, _state.Positions.Count,
             netRewardPerUnit / lossPerUnitAtStop);
         if (await _executor.HasOpenPositionAsync(update.Symbol, cancellationToken) ||
-            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0) return;
+            await _executor.GetOpenOrderCountAsync(cancellationToken, update.Symbol) != 0)
+        {
+            scan?.Reject("EXCHANGE_EXPOSURE");
+            return;
+        }
+        scan?.Accept(signal.EntryPrice, stop, take, netRewardPerUnit / lossPerUnitAtStop);
+        if (scan is not null) scan.Stage = "EXECUTION_PREPARATION";
         await _executor.SetLeverageAsync(update.Symbol, signal.Direction, leverage, cancellationToken);
         _state.PendingOrder = "bot-" + Guid.NewGuid().ToString("N");
         var entryId = _state.PendingOrder;
@@ -327,8 +375,19 @@ public sealed partial class LiveTradingEngine : IDisposable
                 HigherTrendCandles = higherTrendCandles
             })));
         await SaveAsync(cancellationToken);
+        if (scan is not null)
+        {
+            scan.OrderId = entryId;
+            scan.ExecutionStatus = "ATTEMPTED";
+            scan.Stage = "ORDER_SUBMISSION";
+        }
         var entryPrice = await _executor.OpenMarketPositionAsync(update.Symbol, signal.Direction, quantity, stop, take,
             _state.PendingOrder, cancellationToken);
+        if (scan is not null)
+        {
+            scan.ExecutionStatus = "PLACED";
+            scan.Stage = "PROTECTION_VERIFICATION";
+        }
         var opened = new SavedPosition(update.Symbol, signal.Direction, quantity, stop, take, DateTimeOffset.UtcNow, entryId);
         _state.Positions.Add(opened);
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":response", entryId, update.Symbol,
@@ -336,18 +395,30 @@ public sealed partial class LiveTradingEngine : IDisposable
             { Position = opened, Receipt = entryPrice })));
         await SaveAsync(cancellationToken);
         await _executor.ValidateProtectionAsync(update.Symbol, signal.Direction, quantity, cancellationToken);
+        var confirmedAt = DateTimeOffset.UtcNow;
+        if (scan is not null)
+        {
+            scan.ExecutionStatus = "FILLED";
+            scan.FilledAt = confirmedAt;
+            scan.ProtectionConfirmed = true;
+        }
+        _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":filled", entryId, update.Symbol,
+            "entry_filled", confirmedAt, JsonSerializer.Serialize(new { Quantity = quantity, Basis = "exchange_position" })));
         _state.JournalOutbox.Add(new LiveTradeEvent(entryId + ":protected", entryId, update.Symbol,
-            "entry_protected", DateTimeOffset.UtcNow, JsonSerializer.Serialize(opened)));
+            "entry_protected", confirmedAt, JsonSerializer.Serialize(opened)));
         _state.PendingOrder = null;
         await SaveAsync(cancellationToken);
         _logger.LogWarning("LIVE OPEN {Direction} {Symbol} | quantity={Quantity} | exchange SL={Stop} TP={Take}",
             signal.Direction, update.Symbol, quantity, stop, take);
     }
 
-    private StrategySignal? ConfirmMacd(StrategySignal? signal, IReadOnlyList<Candle> entryCandles, TimeFrame timeFrame)
+    private StrategySignal? ConfirmMacd(StrategySignal? signal, IReadOnlyList<Candle> entryCandles, TimeFrame timeFrame, SignalScan? scan)
     {
         if (signal is null || !_options.Macd.Enabled) return signal;
+        if (scan is not null) scan.Stage = "MACD_CONFIRMATION";
         var macd = MacdEntryFilter.Evaluate(entryCandles, signal, timeFrame, _options.Macd);
+        if (scan is not null) scan.Macd = macd;
+        if (!macd.Allowed) scan?.Reject("MACD_FILTER_REJECTED");
         MacdEntryFilter.Log(_logger, "LIVE", signal, macd);
         return macd.Allowed ? signal with { Macd = macd } : null;
     }
@@ -365,6 +436,7 @@ public sealed partial class LiveTradingEngine : IDisposable
                 file.Flush(true);
             }
             File.Move(path + ".tmp", path, true);
+            Volatile.Write(ref _savedPositions, _state.Positions.ToArray());
             if (!flushJournal)
             {
                 _logger.LogCritical("Emergency protection persisted in local outbox; new entries remain blocked until exchange/database reconciliation");

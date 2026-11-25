@@ -9,6 +9,7 @@ namespace TradingBot.Worker.Infrastructure.Persistence;
 
 public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITradeStore, ILiveTradeJournal
 {
+    public SignalScanStore SignalScans => new(() => new SqliteConnection(BuildConnectionString()));
     public ITradingResearchStore Research
     {
         get

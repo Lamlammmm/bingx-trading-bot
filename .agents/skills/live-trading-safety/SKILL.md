@@ -1,0 +1,13 @@
+---
+name: live-trading-safety
+description: Audit production readiness and prepare go/no-go, kill switch, rollback, and monitoring plans for this bot's Current Strategy on BingX Live.
+---
+
+# Live trading safety
+
+1. Establish deployed revision and candidate binary hash, hosting process, configuration precedence, approved strategy version, state path, account mode, open positions and unresolved client order IDs. Cross-check active policy from the DB with the host's effective environment. Keep credentials and raw signed requests out of outputs. Use the runbooks as starting points and verify the actual code path of CLI commands before touching shared state, including indirect initialization.
+2. Trace checks in `LiveTradingEngine*.cs`, `RiskManager.cs`, the BingX executor and the state/journal stores. Record the effective drawdown and daily loss limits, size, leverage, margin, concurrent positions, exposure and consecutive-loss behavior. Check SL/TP precision, minimum notional, partial fills, duplicate signals and orders, ambiguous writes, concurrent instances, process restarts and reconnect. Confirm exactly which checks occur before an order write.
+3. Verify emergency stop and restart behavior with open positions. A kill switch should prevent new entries while the approved protection and monitoring policy continues, including when account reads temporarily fail. Distinguish stopping entry from stopping the process, canceling protective orders or flattening positions. Leave an unknown order blocked until reconciled against the exchange by identity. Preserve state and journal during rollback.
+4. Use local tests and loopback exchange simulations for fault injection and order lifecycles. Real preflight checks are limited to separately authorized reads. Use `/health/live`, `/health/ready`, the bot status endpoint, `docs/signal-diagnostics.md` and deployment logs to check data freshness, stale/gapped feeds and monitoring across modes. A green health route alone does not prove exchange protection or resilience. Backtest returns never substitute for execution safety.
+
+Deliver a Go/No-Go report identifying config values without secrets, the exact build and checks that passed, failed or remain unverified. Any unresolved critical gate means No-Go. Include monitoring, manual intervention and rollback triggers. Do not enable Live, change real orders or accounts, or restart a production trading host on the authority of this skill. Approval of a specific rollout belongs to the operator after review. Experimental never routes to Live, and AI and Current risk/entry thresholds stay as configured unless a separate change is authorized.

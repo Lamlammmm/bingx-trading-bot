@@ -9,7 +9,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Content Remove="data/**;exports/**" />
+    <Content Remove="data/**;exports/**;artifacts/**;Properties/PublishProfiles/**" />
     <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
   </ItemGroup>
 
