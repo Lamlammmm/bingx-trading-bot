@@ -22,8 +22,11 @@ public sealed class TradingWorker(Channel<MarketUpdate> updates, PaperTradingEng
             // Live protection and entries must not wait for optional paper AI analysis.
             try
             {
-                await liveTrading.ProcessAsync(update, stoppingToken);
-                failed = !liveTrading.IsReady;
+                if (!update.IsInitialHistory)
+                {
+                    await liveTrading.ProcessAsync(update, stoppingToken);
+                    failed = !liveTrading.IsReady;
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -49,6 +52,11 @@ public sealed class TradingWorker(Channel<MarketUpdate> updates, PaperTradingEng
                 failed = true;
                 logger.LogError(exception, "Paper trading processing failed for {Symbol} {TimeFrame} candle at {OpenTime}",
                     update.Symbol, update.TimeFrame, update.Candle.OpenTime);
+            }
+            if (update.IsInitialHistory)
+            {
+                if (failed) state.Snapshot = state.Snapshot with { HasProcessingError = true };
+                continue;
             }
             shadowTrading?.Observe(update);
             state.Snapshot = state.Snapshot with

@@ -192,7 +192,8 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         {
             ("Rsi5m", "TEXT"), ("Rsi15m", "TEXT"), ("Rsi1h", "TEXT"), ("Atr5m", "TEXT"),
             ("EmaFast5m", "TEXT"), ("EmaSlow5m", "TEXT"), ("VolumeRatio5m", "TEXT"),
-            ("BodyRatio5m", "TEXT"), ("Confidence", "TEXT"), ("HourOfDayUtc", "INTEGER"), ("DayOfWeekUtc", "INTEGER"), ("Metrics", "TEXT"),
+            ("BodyRatio5m", "TEXT"), ("Confidence", "TEXT"), ("HourOfDayUtc", "INTEGER"), ("DayOfWeekUtc", "INTEGER"),
+            ("Metrics", "TEXT"), ("SettlementId", "TEXT"),
         };
         foreach (var (name, sqlType) in featureColumns)
         {
@@ -201,6 +202,10 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
             alter.CommandText = $"ALTER TABLE ClosedTrades ADD COLUMN {name} {sqlType} NULL;";
             await alter.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        await using var settlementIndex = connection.CreateCommand();
+        settlementIndex.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS UX_ClosedTrades_SettlementId ON ClosedTrades (SettlementId);";
+        await settlementIndex.ExecuteNonQueryAsync(cancellationToken);
     }
 
 
@@ -210,24 +215,17 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         await using var connection = new SqliteConnection(BuildConnectionString());
         await connection.OpenAsync(token);
         await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(token);
+        if (closedTrade is not null && !await RecordClosedTradeAsync(closedTrade, connection, transaction, token, closedTrade.SettlementId))
+            return; // The original transaction already saved the account, positions and journal.
         await SaveAccountStateAsync(account, connection, transaction, token);
         await SaveOpenPositionsAsync(positions, connection, transaction, token);
-        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, token);
         foreach (var entry in events) await SqlTradingResearchStore.AppendInTransactionAsync(connection, transaction, entry, token);
         await transaction.CommitAsync(token);
     }
 
-    public async Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
-        ClosedTrade? closedTrade, CancellationToken cancellationToken)
-    {
-        await using var connection = new SqliteConnection(BuildConnectionString());
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = (SqliteTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await SaveAccountStateAsync(account, connection, transaction, cancellationToken);
-        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
-        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
+    public Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, CancellationToken cancellationToken) =>
+        CommitPaperStateWithJournalAsync(account, positions, closedTrade, [], cancellationToken);
 
     public async Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken)
     {
@@ -431,20 +429,22 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static async Task RecordClosedTradeAsync(ClosedTrade trade, SqliteConnection connection,
-        SqliteTransaction transaction, CancellationToken cancellationToken)
+    private static async Task<bool> RecordClosedTradeAsync(ClosedTrade trade, SqliteConnection connection,
+        SqliteTransaction transaction, CancellationToken cancellationToken, string? settlementId = null)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO ClosedTrades
                 (Symbol, Direction, Quantity, EntryPrice, ExitPrice, StopLoss, TakeProfit, NetPnl, ExitReason, Source, OpenedAt, ClosedAt,
-                 Rsi5m, Rsi15m, Rsi1h, Atr5m, EmaFast5m, EmaSlow5m, VolumeRatio5m, BodyRatio5m, Confidence, HourOfDayUtc, DayOfWeekUtc, Metrics)
+                 Rsi5m, Rsi15m, Rsi1h, Atr5m, EmaFast5m, EmaSlow5m, VolumeRatio5m, BodyRatio5m, Confidence, HourOfDayUtc, DayOfWeekUtc, Metrics, SettlementId)
             VALUES
                 ($symbol, $direction, $quantity, $entryPrice, $exitPrice, $stopLoss, $takeProfit, $netPnl, $exitReason, $source, $openedAt, $closedAt,
-                 $rsi5m, $rsi15m, $rsi1h, $atr5m, $emaFast5m, $emaSlow5m, $volumeRatio5m, $bodyRatio5m, $confidence, $hourOfDayUtc, $dayOfWeekUtc, $metrics);
+                 $rsi5m, $rsi15m, $rsi1h, $atr5m, $emaFast5m, $emaSlow5m, $volumeRatio5m, $bodyRatio5m, $confidence, $hourOfDayUtc, $dayOfWeekUtc, $metrics, $settlementId)
+            ON CONFLICT (SettlementId) DO NOTHING;
             """;
         var invariant = System.Globalization.CultureInfo.InvariantCulture;
+        command.Parameters.AddWithValue("$settlementId", (object?)settlementId ?? DBNull.Value);
         command.Parameters.AddWithValue("$metrics", JsonSerializer.Serialize(trade.Metrics));
         command.Parameters.AddWithValue("$symbol", trade.Symbol);
         command.Parameters.AddWithValue("$direction", trade.Direction.ToString());
@@ -470,7 +470,15 @@ public sealed class SqliteTradeStore(IOptions<PersistenceOptions> options) : ITr
         command.Parameters.AddWithValue("$confidence", (object?)features?.Confidence.ToString(invariant) ?? DBNull.Value);
         command.Parameters.AddWithValue("$hourOfDayUtc", (object?)features?.HourOfDayUtc ?? DBNull.Value);
         command.Parameters.AddWithValue("$dayOfWeekUtc", (object?)features?.DayOfWeekUtc ?? DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 1) return true;
+        command.CommandText = """
+            SELECT 1 FROM ClosedTrades
+            WHERE SettlementId = $settlementId AND ClosedAt = $closedAt AND ExitPrice = $exitPrice
+              AND NetPnl = $netPnl AND ExitReason = $exitReason AND Quantity = $quantity AND Metrics = $metrics;
+            """;
+        if (await command.ExecuteScalarAsync(cancellationToken) is null)
+            throw new InvalidOperationException($"Conflicting paper settlement for {settlementId}.");
+        return false;
     }
 
     private string BuildConnectionString() => new SqliteConnectionStringBuilder { DataSource = _databasePath }.ToString();

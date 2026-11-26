@@ -413,8 +413,10 @@ public sealed class LivePositionManagementTests
         Assert.Null(f.State().PendingOrder);
     }
 
-    [Fact]
-    public async Task BothEnginesUseApprovedPoliciesAndJournalWithAiDisabled()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BothEnginesUseApprovedPoliciesAndLiveCanRejectOnAccountRisk(bool liveDailyLoss)
     {
         using var f = new Fixture(TradeDirection.Long, held: false);
         var settings = new StrategyOptions { RsiOverbought = 101m, MaxRetestEntryDistanceAtr = 0m };
@@ -425,21 +427,32 @@ public sealed class LivePositionManagementTests
             ai, db.Trades, contracts, Options.Create(f.Risk), Options.Create(new PaperTradingOptions()), Options.Create(new OpenAIOptions()),
             Options.Create(settings), NullLogger<PaperTradingEngine>.Instance, db.Governance, market);
         await paper.InitializeAsync(default);
+        // Both cases exceed the former drawdown limit. Daily loss still rejects the second case.
+        File.WriteAllText(f.PathName, JsonSerializer.Serialize(new LiveTradingEngine.LiveState { EquityHighWater = 1500m }));
         using var live = f.Create(db.Governance, market); await live.InitializeAsync(default);
+        if (liveDailyLoss) f.Exchange.Account = new(970m, 970m, 970m, 1000m, -30m, 0m);
         await f.Entry(live, paper);
-        var livePosition = Assert.Single(f.State().Positions);
         var paperPosition = Assert.Single(await db.Trades.LoadOpenPositionsAsync(default));
-        Assert.Equal(TradingMode.LIVE, livePosition.Management!.Metrics.Context!.Strategy.Mode);
         Assert.Equal(TradingMode.PAPER, paperPosition.Metrics!.Context!.Strategy.Mode);
         Assert.Equal(0, ai.Calls);
+        var paperEvents = new List<TradingJournalEvent>();
+        await foreach (var e in db.Store.ReadAsync(TradingMode.PAPER, DateTimeOffset.MinValue, default)) paperEvents.Add(e);
+        Assert.Contains(paperEvents, e => e.Kind == "entry_filled" && e.StrategyVersion == "mtf-v1" &&
+            e.TradeId == paperPosition.Metrics.Context.TradeId);
+        if (liveDailyLoss)
+        {
+            Assert.Empty(f.Exchange.Writes);
+            Assert.Empty(f.State().Positions);
+            Assert.Null(f.State().PendingOrder);
+            return;
+        }
+        var livePosition = Assert.Single(f.State().Positions);
+        Assert.Equal(TradingMode.LIVE, livePosition.Management!.Metrics.Context!.Strategy.Mode);
         var liveEvents = new List<TradingJournalEvent>();
         await foreach (var e in db.Store.ReadAsync(TradingMode.LIVE, DateTimeOffset.MinValue, default)) liveEvents.Add(e);
         Assert.Contains(liveEvents, e => e.Kind == "entry_requested" && e.StrategyVersion == "mtf-v1");
         Assert.Contains(liveEvents, e => e.Kind == "entry_filled" && e.TradeId == livePosition.TradeId);
         Assert.Contains(liveEvents, e => e.Kind == "entry_protected" && e.TradeId == livePosition.TradeId);
-        var paperEvents = new List<TradingJournalEvent>();
-        await foreach (var e in db.Store.ReadAsync(TradingMode.PAPER, DateTimeOffset.MinValue, default)) paperEvents.Add(e);
-        Assert.Contains(paperEvents, e => e.Kind == "entry_filled" && e.TradeId == paperPosition.Metrics.Context.TradeId);
         f.Exchange.Quantity = 0m;
         f.Exchange.Income = new(-10.1m, -0.05m, -0.1m, 3, true, true, -9.95m);
         await live.ProcessAsync(f.Bar(1, 90m) with { Candle = f.Bar(1, 90m).Candle with { OpenTime = DateTimeOffset.UtcNow.AddSeconds(1), CloseTime = DateTimeOffset.UtcNow.AddSeconds(2) } }, default);

@@ -71,7 +71,7 @@ public sealed class OpenAiDecisionLoggingTests
         await engine.InitializeAsync(CancellationToken.None);
         await engine.ProcessAsync(update, CancellationToken.None);
 
-        Assert.DoesNotContain(logger.Messages, message => message.Contains("PAPER OPEN", StringComparison.Ordinal));
+        Assert.DoesNotContain(logger.Messages, message => message.Contains("POSITION_OPENED", StringComparison.Ordinal));
     }
 
     private static PaperTradingEngine CreateEngine(AiDecision? decision, StrategySignal? technicalSignal,

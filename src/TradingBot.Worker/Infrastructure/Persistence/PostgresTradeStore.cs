@@ -190,6 +190,8 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
             ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS ema_slow_5m NUMERIC NULL;
             ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS volume_ratio_5m NUMERIC NULL;
             ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS body_ratio_5m NUMERIC NULL;
+            ALTER TABLE closed_trades ADD COLUMN IF NOT EXISTS settlement_id TEXT NULL;
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_closed_trades_settlement_id ON closed_trades (settlement_id);
             """;
         await alterClosedTrades.ExecuteNonQueryAsync(cancellationToken);
         await using var tradeMetricsColumn = connection.CreateCommand();
@@ -204,24 +206,17 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         await using var connection = new NpgsqlConnection(_connectionString);
         await connection.OpenAsync(token);
         await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(token);
+        if (closedTrade is not null && !await RecordClosedTradeAsync(closedTrade, connection, transaction, token, closedTrade.SettlementId))
+            return; // The original transaction already saved the account, positions and journal.
         await SaveAccountStateAsync(account, connection, transaction, token);
         await SaveOpenPositionsAsync(positions, connection, transaction, token);
-        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, token);
         foreach (var entry in events) await SqlTradingResearchStore.AppendInTransactionAsync(connection, transaction, entry, token);
         await transaction.CommitAsync(token);
     }
 
-    public async Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
-        ClosedTrade? closedTrade, CancellationToken cancellationToken)
-    {
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = (NpgsqlTransaction)await connection.BeginTransactionAsync(cancellationToken);
-        await SaveAccountStateAsync(account, connection, transaction, cancellationToken);
-        await SaveOpenPositionsAsync(positions, connection, transaction, cancellationToken);
-        if (closedTrade is not null) await RecordClosedTradeAsync(closedTrade, connection, transaction, cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-    }
+    public Task CommitPaperStateAsync(AccountState account, IReadOnlyCollection<PaperPosition> positions,
+        ClosedTrade? closedTrade, CancellationToken cancellationToken) =>
+        CommitPaperStateWithJournalAsync(account, positions, closedTrade, [], cancellationToken);
 
     public async Task<AccountState?> LoadAccountStateAsync(CancellationToken cancellationToken)
     {
@@ -414,19 +409,21 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private static async Task RecordClosedTradeAsync(ClosedTrade trade, NpgsqlConnection connection,
-        NpgsqlTransaction transaction, CancellationToken cancellationToken)
+    private static async Task<bool> RecordClosedTradeAsync(ClosedTrade trade, NpgsqlConnection connection,
+        NpgsqlTransaction transaction, CancellationToken cancellationToken, string? settlementId = null)
     {
         await using var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
             INSERT INTO closed_trades
                 (symbol, direction, quantity, entry_price, exit_price, stop_loss, take_profit, net_pnl, exit_reason, source, opened_at, closed_at,
-                 rsi_5m, rsi_15m, rsi_1h, atr_5m, ema_fast_5m, ema_slow_5m, volume_ratio_5m, body_ratio_5m, confidence, hour_of_day_utc, day_of_week_utc, metrics)
+                 rsi_5m, rsi_15m, rsi_1h, atr_5m, ema_fast_5m, ema_slow_5m, volume_ratio_5m, body_ratio_5m, confidence, hour_of_day_utc, day_of_week_utc, metrics, settlement_id)
             VALUES
                 (@symbol, @direction, @quantity, @entryPrice, @exitPrice, @stopLoss, @takeProfit, @netPnl, @exitReason, @source, @openedAt, @closedAt,
-                 @rsi5m, @rsi15m, @rsi1h, @atr5m, @emaFast5m, @emaSlow5m, @volumeRatio5m, @bodyRatio5m, @confidence, @hourOfDayUtc, @dayOfWeekUtc, @metrics);
+                 @rsi5m, @rsi15m, @rsi1h, @atr5m, @emaFast5m, @emaSlow5m, @volumeRatio5m, @bodyRatio5m, @confidence, @hourOfDayUtc, @dayOfWeekUtc, @metrics, @settlementId)
+            ON CONFLICT (settlement_id) DO NOTHING;
             """;
+        command.Parameters.AddWithValue("settlementId", NpgsqlTypes.NpgsqlDbType.Text, (object?)settlementId ?? DBNull.Value);
         command.Parameters.AddWithValue("metrics", JsonSerializer.Serialize(trade.Metrics));
         command.Parameters.AddWithValue("symbol", trade.Symbol);
         command.Parameters.AddWithValue("direction", trade.Direction.ToString());
@@ -452,6 +449,14 @@ public sealed class PostgresTradeStore(IOptions<PersistenceOptions> options) : I
         command.Parameters.AddWithValue("confidence", (object?)features?.Confidence ?? DBNull.Value);
         command.Parameters.AddWithValue("hourOfDayUtc", (object?)features?.HourOfDayUtc ?? DBNull.Value);
         command.Parameters.AddWithValue("dayOfWeekUtc", (object?)features?.DayOfWeekUtc ?? DBNull.Value);
-        await command.ExecuteNonQueryAsync(cancellationToken);
+        if (await command.ExecuteNonQueryAsync(cancellationToken) == 1) return true;
+        command.CommandText = """
+            SELECT 1 FROM closed_trades
+            WHERE settlement_id = @settlementId AND closed_at = @closedAt AND exit_price = @exitPrice
+              AND net_pnl = @netPnl AND exit_reason = @exitReason AND quantity = @quantity AND metrics = @metrics;
+            """;
+        if (await command.ExecuteScalarAsync(cancellationToken) is null)
+            throw new InvalidOperationException($"Conflicting paper settlement for {settlementId}.");
+        return false;
     }
 }

@@ -137,12 +137,6 @@ public sealed partial class LiveTradingEngine
         if (scan is not null) scan.Stage = "ACCOUNT_AND_RISK";
         var account = await ObserveAccountAsync(token);
         var feeRate = Math.Max(riskPolicy.FeeRate, account.TakerFeeRate);
-        var adjustedEquity = account.Equity - _state.CashFlowAdjustment;
-        if (_state.EquityHighWater > 0m && (_state.EquityHighWater - adjustedEquity) / _state.EquityHighWater * 100m >= riskPolicy.MaxDrawdownPercent)
-        {
-            scan?.Reject("DRAWDOWN_LIMIT");
-            return;
-        }
         var dailyPnlIncludingUnrealized = Math.Min(account.NetTradingIncomeToday + account.Equity - account.WalletBalance,
             account.Equity - _state.DayStartBalance - account.ExternalIncomeToday);
         if (_state.DayStartBalance <= 0m || dailyPnlIncludingUnrealized <= -_state.DayStartBalance * riskPolicy.MaxDailyLossPercent / 100m)

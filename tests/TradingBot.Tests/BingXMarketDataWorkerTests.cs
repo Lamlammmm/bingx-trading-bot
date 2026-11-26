@@ -28,6 +28,9 @@ public sealed class BingXMarketDataWorkerTests
             await worker.StartAsync(default);
             await market.Connected.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(new[] { "ETH-USDT" }, market.InitialSymbols);
+            Assert.True(updates.Reader.TryRead(out var historyUpdate));
+            Assert.Equal("ETH-USDT", historyUpdate.Symbol);
+            Assert.True(historyUpdate.IsInitialHistory && historyUpdate.IsReconciliation);
             Assert.True(updates.Reader.TryRead(out var healthyUpdate));
             Assert.Equal("ETH-USDT", healthyUpdate.Symbol);
             Assert.False(healthyUpdate.IsReconciliation);
@@ -47,7 +50,9 @@ public sealed class BingXMarketDataWorkerTests
         foreach (var frame in new[] { TimeFrame.FiveMinutes, TimeFrame.ThirtyMinutes, TimeFrame.OneHour })
             Assert.Single(candles.Get("BTC-USDT", frame));
         Assert.Empty(candles.Get("BTC-USDT", TimeFrame.FifteenMinutes));
-        // Initial history for a newly recovered symbol must not trigger retrospective entries.
+        Assert.True(updates.Reader.TryRead(out var recoveredHistory));
+        Assert.Equal("BTC-USDT", recoveredHistory.Symbol);
+        Assert.True(recoveredHistory.IsInitialHistory && recoveredHistory.IsReconciliation);
         Assert.False(updates.Reader.TryRead(out _));
     }
 
@@ -115,7 +120,10 @@ public sealed class BingXMarketDataWorkerTests
         Assert.Empty(candles.Get("BTC-USDT", TimeFrame.FifteenMinutes));
         var replay = new List<MarketUpdate>();
         while (updates.Reader.TryRead(out var update)) replay.Add(update);
-        Assert.Equal(TimeFrame.FiveMinutes, Assert.Single(replay).TimeFrame);
+        Assert.Equal(2, replay.Count);
+        Assert.True(replay[0].IsInitialHistory);
+        Assert.False(replay[1].IsInitialHistory);
+        Assert.All(replay, update => Assert.Equal(TimeFrame.FiveMinutes, update.TimeFrame));
         Assert.All(replay, update => { Assert.True(update.IsReconciliation); Assert.True(update.Candle.IsClosed); });
     }
 

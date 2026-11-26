@@ -16,6 +16,13 @@ assumptions:
     verification: On 2026-10-30, the smoke observed three BTC loads, one ETH load, two modeled failures and 17 ETH candles on one connection. All 100 unit/integration tests passed, including the local WebSocket subscription test. On 2026-11-21, the Release readiness smoke observed the same BTC and ETH load counts, 18 ETH candles on one simulated stream and the expected timeframe durations. The local simulator served 13 requests. No real exchange call or order was made by these tests.
     source: tests/TradingBot.SimulationSmoke/Program.cs; tests/TradingBot.Tests/BingXWebSocketSubscriptionTests.cs; postman/mocks/bingx-history-recovery/default.js
     updated_at: "2026-11-21"
+  - id: startup-history-notification
+    status: supported
+    claim: Against the modeled BingX history API, the worker signals completed startup history once per successfully loaded symbol, including a symbol recovered after rate limiting.
+    reason: The resulting updates contained one closed 5m startup reconciliation notification per symbol and continued normal ETH stream updates. The notification tells Paper to evaluate already-open positions from cached history.
+    verification: On 2026-11-26, TradingBot.SimulationSmoke against the local Postman simulation observed two code-100410 responses, two startup notifications, 18 normal ETH bars and 13 GET requests including the mock state read. The smoke instantiated only the market worker and REST client. Separate PaperTradingEngineTests cover position settlement and prohibit new entries from startup history.
+    source: tests/TradingBot.SimulationSmoke/Program.cs; tests/TradingBot.Tests/PaperTradingEngineTests.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXMarketDataWorker.cs
+    updated_at: "2026-11-26"
 fingerprints:
   - id: timeframe-5m-dirty
     date: "2026-10-30"
@@ -24,4 +31,8 @@ fingerprints:
   - id: live-readiness-20261121
     date: "2026-11-21"
     commit: 0ea1b6c7f093a2cf92d57224d6611118d4a4b985 (dirty candidate tree)
+    cli: "1.73.0"
+  - id: paper-startup-reconciliation-20261126
+    date: "2026-11-26"
+    commit: cee5baf (dirty candidate tree)
     cli: "1.73.0"

@@ -154,10 +154,66 @@ public sealed class PaperTradingEngineTests
 
         var exit = exitReason == "SL" ? stop : take;
         await engine.ProcessAsync(new("BTC-USDT", TimeFrame.FiveMinutes,
-            new Candle(now.AddMinutes(-5), now, 100m, Math.Max(100m, exit), Math.Min(100m, exit), exit, 10m, true)), default);
+            new Candle(now.AddMinutes(-5), now, 100m, Math.Max(100m, exit), Math.Min(100m, exit), 100m, 10m, true)), default);
 
         Assert.NotNull(store.ClosedTrade);
         Assert.Equal(exitReason, store.ClosedTrade.ExitReason);
+    }
+
+    [Theory]
+    [InlineData(TradeDirection.Long, false)]
+    [InlineData(TradeDirection.Short, false)]
+    [InlineData(TradeDirection.Long, true)]
+    [InlineData(TradeDirection.Short, true)]
+    public async Task StartupReplaysOnlyContiguousClosedHistoryAndSettlesOnce(TradeDirection direction, bool missingFirstBar)
+    {
+        const string symbol = "BTC-USDT";
+        var boundary = new DateTimeOffset(DateTime.UtcNow.Date.AddDays(-2).AddHours(8).AddMinutes(20), TimeSpan.Zero);
+        var stop = direction == TradeDirection.Long ? 90m : 110m;
+        var take = direction == TradeDirection.Long ? 120m : 80m;
+        var position = new PaperPosition(symbol, direction, 1m, 100m, stop, take, 10m, 0m,
+            boundary.AddMilliseconds(-1));
+        var store = new CapturingTradeStore(position);
+        var candles = new InMemoryCandleStore();
+        var strategy = new CapturingStrategy();
+        var risk = Options.Create(new RiskOptions { FeeRate = 0m, UsePartialTakeProfit = false });
+        var engine = new PaperTradingEngine(candles, strategy, new RiskManager(risk), new DisabledAnalyzer(),
+            store, new InMemoryContractStore(), risk, Options.Create(new PaperTradingOptions { SlippageBasisPoints = 0m }),
+            Options.Create(new OpenAIOptions()), Options.Create(new StrategyOptions()), NullLogger<PaperTradingEngine>.Instance);
+        await engine.InitializeAsync(default);
+        var first = new Candle(boundary, boundary.AddMinutes(5), 100m, 101m, 99m, 100m, 10m, true);
+        var tp = first with { OpenTime = first.CloseTime, CloseTime = boundary.AddMinutes(10),
+            High = Math.Max(101m, take), Low = Math.Min(99m, take) };
+        var last = first with { OpenTime = tp.CloseTime, CloseTime = boundary.AddMinutes(15) };
+        // Both thresholds appear on the entry candle, and on a queued candle after the recovery cutoff.
+        candles.Upsert(symbol, TimeFrame.FiveMinutes,
+            first with { OpenTime = boundary.AddMinutes(-5), CloseTime = position.OpenedAt, High = 150m, Low = 60m });
+        if (!missingFirstBar) candles.Upsert(symbol, TimeFrame.FiveMinutes, first);
+        candles.Upsert(symbol, TimeFrame.FiveMinutes, tp);
+        candles.Upsert(symbol, TimeFrame.FiveMinutes,
+            last with { OpenTime = last.CloseTime, CloseTime = boundary.AddMinutes(20), High = 150m, Low = 60m });
+        var restore = new MarketUpdate(symbol, TimeFrame.FiveMinutes, last, IsReconciliation: true) { IsInitialHistory = true };
+
+        await Task.WhenAll(Task.Run(() => engine.ProcessAsync(restore, default)),
+            Task.Run(() => engine.ProcessAsync(restore, default)));
+
+        Assert.Equal(0, strategy.Calls);
+        if (missingFirstBar)
+        {
+            Assert.Null(store.ClosedTrade);
+            Assert.Equal(position, Assert.Single(store.Positions));
+
+            candles.Upsert(symbol, TimeFrame.FiveMinutes, first);
+            await engine.ProcessAsync(new(symbol, TimeFrame.FiveMinutes,
+                last with { OpenTime = last.CloseTime, CloseTime = boundary.AddMinutes(20), High = 150m, Low = 60m }), default);
+        }
+        Assert.Empty(store.Positions);
+        Assert.Equal("TP", store.ClosedTrade?.ExitReason);
+        Assert.Equal(tp.CloseTime, store.ClosedTrade?.ClosedAt);
+        Assert.Equal(take, store.ClosedTrade?.ExitPrice);
+        Assert.Equal(20m, store.ClosedTrade?.NetPnl);
+        Assert.Equal(1, store.AccountState?.TotalWins);
+        Assert.Equal(0m, store.AccountState?.RealizedPnlToday);
     }
 
     [Fact]

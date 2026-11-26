@@ -75,9 +75,12 @@ public sealed class TradingGovernance(ITradingResearchStore store, IOptions<Stra
         var relevant = outcomes.Where(t => t.Strategy.ConfigurationHash == policy.Snapshot.ConfigurationHash && t.Regime == regime).ToArray();
         var capital = outcomes.FirstOrDefault()?.EquityAtEntry ?? policy.Configuration.Risk.StartingBalance;
         var summary = PerformanceAnalyzer.Analyze(policy.Snapshot.Mode, relevant, capital)[0];
-        var all = PerformanceAnalyzer.Analyze(policy.Snapshot.Mode, outcomes, capital)[0];
-        if (all.MaximumDrawdownPercent >= policy.Configuration.Risk.MaxDrawdownPercent)
-            return new(false, 0m, "realized drawdown limit reached");
+        if (policy.Snapshot.Mode != TradingMode.LIVE)
+        {
+            var all = PerformanceAnalyzer.Analyze(policy.Snapshot.Mode, outcomes, capital)[0];
+            if (all.MaximumDrawdownPercent >= policy.Configuration.Risk.MaxDrawdownPercent)
+                return new(false, 0m, "realized drawdown limit reached");
+        }
         return PerformanceAnalyzer.Decide(policy.Configuration, summary, spread, await store.IsHaltedAsync(policy.Snapshot.Mode, token));
     }
 

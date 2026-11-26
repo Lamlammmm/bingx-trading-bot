@@ -92,7 +92,7 @@ public sealed class PersistenceTests
             {
                 await connection.OpenAsync();
                 await using var command = connection.CreateCommand();
-                command.CommandText = "CREATE TRIGGER fail_close BEFORE INSERT ON ClosedTrades BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
+                command.CommandText = "CREATE TRIGGER fail_positions BEFORE DELETE ON OpenPositions BEGIN SELECT RAISE(ABORT, 'injected write failure'); END;";
                 await command.ExecuteNonQueryAsync();
             }
             var closed = new ClosedTrade("BTC-USDT", TradeDirection.Long, 1m, 100m, 90m, 90m, 120m, -10m,
@@ -101,6 +101,45 @@ public sealed class PersistenceTests
             Assert.Equal(100m, (await store.LoadAccountStateAsync(default))!.Balance);
             Assert.Single(await store.LoadOpenPositionsAsync(default));
             Assert.Null(await store.LoadTradePerformanceAsync(default));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            if (File.Exists(path)) File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public async Task SqlitePaperCloseIgnoresDuplicateCommitAndRejectsConflictingSettlement()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"bingx-settlement-{Guid.NewGuid():N}.db");
+        try
+        {
+            var store = new SqliteTradeStore(Options.Create(new PersistenceOptions { DatabasePath = path }));
+            await store.InitializeAsync(default);
+            var opened = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+            var account = new AccountState(100m, new DateOnly(2026, 9, 1), 0m);
+            var position = new PaperPosition("BTC-USDT", TradeDirection.Long, 1m, 100m, 90m, 120m, 10m, 0m, opened);
+            await store.CommitPaperStateAsync(account, [position], null, default);
+            var closed = new ClosedTrade("BTC-USDT", TradeDirection.Long, 1m, 100m, 120m, 90m, 120m, 20m,
+                "TP", "paper", opened, opened.AddMinutes(5));
+            var afterClose = account with { Balance = 120m, RealizedPnlToday = 20m };
+
+            await Task.WhenAll(
+                Task.Run(() => store.CommitPaperStateAsync(afterClose, [], closed, default)),
+                Task.Run(() => store.CommitPaperStateAsync(afterClose, [], closed, default)));
+            Assert.Equal(new TradePerformance(1, 0, 20m), await store.LoadTradePerformanceAsync(default));
+            Assert.Empty(await store.LoadOpenPositionsAsync(default));
+
+            await store.CommitPaperStateAsync(afterClose with { Balance = 119m },
+                [position with { OpenedAt = opened.AddMinutes(10) }], null, default);
+            await store.CommitPaperStateAsync(afterClose, [], closed, default);
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                store.CommitPaperStateAsync(afterClose, [], closed with { ExitPrice = 119m }, default));
+
+            Assert.Equal(119m, (await store.LoadAccountStateAsync(default))!.Balance);
+            Assert.Equal(opened.AddMinutes(10), Assert.Single(await store.LoadOpenPositionsAsync(default)).OpenedAt);
+            Assert.Equal(new TradePerformance(1, 0, 20m), await store.LoadTradePerformanceAsync(default));
         }
         finally
         {

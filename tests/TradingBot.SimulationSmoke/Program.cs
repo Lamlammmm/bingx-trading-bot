@@ -32,8 +32,19 @@ var ethLoads = calls.GetProperty("/openApi/swap/v2/quote/contracts:ETH-USDT:").G
 var btcLoads = calls.GetProperty("/openApi/swap/v2/quote/contracts:BTC-USDT:").GetInt32();
 var failures = stats.RootElement.GetProperty("failures").GetInt32();
 var ethUpdates = 0;
+var initialHistory = new HashSet<string>();
 while (updates.Reader.TryRead(out var update))
-    if (update.Symbol == "ETH-USDT") ethUpdates++;
+{
+    if (update.IsInitialHistory)
+    {
+        if (!update.IsReconciliation || update.TimeFrame != TimeFrame.FiveMinutes ||
+            !update.Candle.IsClosed || !initialHistory.Add(update.Symbol))
+            throw new Exception($"Invalid startup history notification for {update.Symbol}");
+    }
+    else if (update.Symbol == "ETH-USDT") ethUpdates++;
+}
+if (!initialHistory.SetEquals(["BTC-USDT", "ETH-USDT"]))
+    throw new Exception("Expected exactly one closed 5m startup history notification for both symbols.");
 if (stream.Connections != 1 || ethLoads != 1 || btcLoads != 3 || failures != 2 || ethUpdates < 2)
     throw new Exception($"Recovery failed: connections={stream.Connections}, ETH loads={ethLoads}, BTC loads={btcLoads}, failures={failures}, ETH updates={ethUpdates}");
 foreach (var symbol in new[] { "BTC-USDT", "ETH-USDT" })
@@ -54,6 +65,7 @@ foreach (var symbol in new[] { "BTC-USDT", "ETH-USDT" })
 }
 Console.WriteLine($"PASS: two HTTP-200/code-100410 failures recovered; BTC loaded {btcLoads} times, ETH once; {ethUpdates} ETH candles processed on one stream connection.");
 Console.WriteLine("PASS: only native 5m/30m/1h history requested; closed candle durations match each interval; no 15m history loaded.");
+Console.WriteLine("PASS: both symbols publish one close-only startup reconciliation notification.");
 
 sealed class HealthyStream : IBingXMarketStream
 {

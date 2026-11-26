@@ -164,6 +164,9 @@ public sealed class BingXMarketDataWorker(IBingXMarketClient marketClient, IBing
 
                 if (isInitialLoad)
                 {
+                    if (timeFrame == TimeFrame.FiveMinutes)
+                        await updates.Writer.WriteAsync(new MarketUpdate(symbol, timeFrame, latest, IsReconciliation: true)
+                            { IsInitialHistory = true }, cancellationToken);
                     _lastPublishedOpenTimes[(symbol, timeFrame)] = latest.OpenTime;
                     continue;
                 }

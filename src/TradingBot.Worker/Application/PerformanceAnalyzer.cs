@@ -49,7 +49,7 @@ public static class PerformanceAnalyzer
         if (!config.Adaptive.Enabled) return new(true, 1m, "adaptive statistics disabled; core risk limits remain active");
         if (spreadBasisPoints is null || spreadBasisPoints < 0m || spreadBasisPoints > config.Adaptive.MaximumSpreadBasisPoints)
             return new(false, 0m, "spread is missing or above the approved limit");
-        if (summary.MaximumDrawdownPercent >= config.Risk.MaxDrawdownPercent)
+        if (summary.Mode != TradingMode.LIVE && summary.MaximumDrawdownPercent >= config.Risk.MaxDrawdownPercent)
             return new(false, 0m, "realized drawdown limit reached");
         if (summary.TradeCount >= config.Adaptive.MinimumTrades && summary.NetExpectancy <= 0m &&
             (summary.ProfitFactor is null || summary.ProfitFactor < config.Adaptive.MinimumProfitFactor))

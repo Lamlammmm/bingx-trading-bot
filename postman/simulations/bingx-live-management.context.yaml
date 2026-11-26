@@ -16,8 +16,10 @@ assumptions:
       Both runs used synthetic credentials. Live exchange fills, races and idempotency retention remain unverified.
       The 2026-11-21 Release readiness run passed all eight scenarios again with the v3 account margin fields.
       The local simulator recorded 246 requests including the separate four-request empty-income pass.
+      On 2026-11-26 the Release loopback smoke passed all eight scenarios again. Logs showed synthetic order,
+      position and income requests, including the unknown manual order response.
     source: src/TradingBot.Worker/Infrastructure/Live/LiveTradingEngine.Advanced.cs; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.Management.cs; tests/TradingBot.ExecutionSmoke/LiveManagementSmoke.cs
-    updated_at: "2026-11-21"
+    updated_at: "2026-11-26"
   - id: successful-empty-income-is-null
     status: supported
     claim: BingX returned HTTP 200 with code 0, an empty message and a null data field for two historical account income queries without ledger rows.
@@ -35,8 +37,10 @@ assumptions:
       with a synthetic exchange. It verified continued enforcement of daily loss and margin/size checks,
       and refusal to reconcile a closed position without realized PnL and trading fee records.
       The Release readiness smoke also asserted used margin, frozen margin and available margin alongside the empty ledger.
+      The 2026-11-26 loopback run again passed `--empty-income`, with balance, income and commission requests.
+      A separate read-only BingX query returned HTTP 200/code 0 with explicit null income for the 2026-11-21 UTC incident day.
     source: docs/trading-pipeline-audit.md; src/TradingBot.Worker/Infrastructure/BingX/BingXLiveExecutor.Management.cs; tests/TradingBot.ExecutionSmoke/Program.cs; tests/TradingBot.Tests/BingXLiveExecutorTests.cs; tests/TradingBot.Tests/LivePositionManagementTests.cs
-    updated_at: "2026-11-21"
+    updated_at: "2026-11-26"
 fingerprints:
   - id: macd-management-20261108
     date: "2026-11-08"
@@ -49,4 +53,8 @@ fingerprints:
   - id: live-readiness-20261121
     date: "2026-11-21"
     commit: 0ea1b6c7f093a2cf92d57224d6611118d4a4b985 (dirty tree, see candidate DLL hash in docs/live-trading-readiness.md)
+    cli: "1.73.0"
+  - id: paper-live-incident-20261126
+    date: "2026-11-26"
+    commit: cee5baf (dirty candidate tree)
     cli: "1.73.0"

@@ -4,7 +4,10 @@ using TradingBot.Worker.Domain;
 namespace TradingBot.Worker.Application;
 
 public sealed record PositionTransition(PaperPosition Position, decimal CashDelta, bool IsClosed,
-    decimal ExitPrice = 0m, string ExitReason = "", decimal TradeNetPnl = 0m, TradeMetrics? Metrics = null);
+    decimal ExitPrice = 0m, string ExitReason = "", decimal TradeNetPnl = 0m, TradeMetrics? Metrics = null)
+{
+    public IReadOnlyList<PartialExitTarget> PartialExits { get; init; } = [];
+}
 
 public sealed record PartialExitTarget(int Stage, decimal Quantity, decimal Price);
 
@@ -73,6 +76,7 @@ public sealed class PositionManager(RiskOptions risk, PaperTradingOptions costs)
         metrics = metrics with { Mfe = Math.Max(metrics.Mfe, Math.Max(0m, favorable)), Mae = Math.Max(metrics.Mae, Math.Max(0m, adverse)) };
         decimal exitPrice = 0m;
         var exitReason = "";
+        IReadOnlyList<PartialExitTarget> partialExits = [];
         if (stopHit)
         {
             // Stops gap through their trigger; fill from open when it is worse.
@@ -81,7 +85,8 @@ public sealed class PositionManager(RiskOptions risk, PaperTradingOptions costs)
         }
         else
         {
-            foreach (var target in PartialTargets(position, sign > 0m ? candle.High : candle.Low, contract))
+            partialExits = PartialTargets(position, sign > 0m ? candle.High : candle.Low, contract);
+            foreach (var target in partialExits)
             {
                 var fill = target.Price * (1m - sign * rate);
                 var fee = fill * target.Quantity * risk.FeeRate;
@@ -107,12 +112,14 @@ public sealed class PositionManager(RiskOptions risk, PaperTradingOptions costs)
                 sign * (requestedExit - exitPrice) / requestedExit * 10_000m,
                 (metrics.ExitNotional + exitPrice * quantity) / initialQuantity,
                 (decimal)(candle.CloseTime - position.OpenedAt).TotalMinutes, metrics.Regime, metrics.Context, metrics.Macd);
-            return new(position with { Metrics = metrics }, cashDelta, true, exitPrice, exitReason, totalPnl, outcome);
+            return new(position with { Metrics = metrics }, cashDelta, true, exitPrice, exitReason, totalPnl, outcome)
+                { PartialExits = partialExits };
         }
         metrics = metrics with { TakeProfitStage = stage };
         var updated = position with { Quantity = quantity, PartialTaken = stage > 0,
             InitialQuantity = initialQuantity, InitialStopLoss = initialStop, RealizedPartialPnl = partialPnl, Metrics = metrics };
-        return new(TightenStop(updated, candle.CloseTime, candle.Close, atr, contract), cashDelta, false);
+        return new(TightenStop(updated, candle.CloseTime, candle.Close, atr, contract), cashDelta, false)
+            { PartialExits = partialExits };
     }
 
     // Shared with live. This computes a proposal only; it never infers fills or calls an exchange.

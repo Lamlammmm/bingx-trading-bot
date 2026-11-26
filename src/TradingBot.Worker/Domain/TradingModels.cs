@@ -16,7 +16,10 @@ public sealed record Candle(
     decimal Volume,
     bool IsClosed);
 
-public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle, bool IsReconciliation = false);
+public sealed record MarketUpdate(string Symbol, TimeFrame TimeFrame, Candle Candle, bool IsReconciliation = false)
+{
+    public bool IsInitialHistory { get; init; }
+}
 
 public sealed record StrategySignal(
     string Symbol,
@@ -131,7 +134,12 @@ public sealed record ClosedTrade(
     DateTimeOffset OpenedAt,
     DateTimeOffset ClosedAt,
     TradeFeatures? EntryFeatures = null,
-    TradeMetrics? Metrics = null);
+    TradeMetrics? Metrics = null)
+{
+    [JsonIgnore]
+    internal string SettlementId => Metrics?.Context?.TradeId ??
+        FormattableString.Invariant($"{Source}:{Symbol}:{Direction}:{OpenedAt.ToUnixTimeMilliseconds()}");
+}
 
 public enum MarketRegime { TrendingUp, TrendingDown, Sideways, HighVolatility, LowVolatility, Unknown }
 
@@ -148,7 +156,9 @@ public sealed record PositionMetrics(
     DateTimeOffset? LastEvaluatedAt = null, DateTimeOffset? LastStopAdjustedAt = null,
     decimal RequestedEntryPrice = 0m, MarketRegime Regime = MarketRegime.Unknown,
     TimeFrame RiskTimeFrame = TimeFrame.FiveMinutes, TradingContext? Context = null, decimal? EntryLatencyMilliseconds = null,
-    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MacdEntryDecision? Macd = null);
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] MacdEntryDecision? Macd = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? SignalId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? StrategyVersion = null);
 
 public sealed record TradeMetrics(decimal InitialRiskAmount, decimal Mfe, decimal Mae,
     decimal FundingPaid, decimal TotalFees, decimal EntrySlippageBasisPoints,
